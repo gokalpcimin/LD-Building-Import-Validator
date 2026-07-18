@@ -1,10 +1,12 @@
 'use client';
 
 import type { ColumnRole, SheetColumnMapping, SheetData } from '../types';
+import type { AiMappingSuggestion } from '../utils/aiMappingSuggester';
+import { suggestMappingWithAi } from '../utils/aiMappingSuggester';
 import { COLUMN_ROLE_LABELS, COLUMN_ROLE_OPTIONS, extractSheetHeaderInfo } from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
-import { ArrowRight, Sparkles } from 'lucide-react';
-import { useMemo } from 'react';
+import { ArrowRight, Check, Loader2, Sparkles, Wand2, X } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
 
 export interface ColumnMappingStepProps {
   sheets: SheetData[];
@@ -24,12 +26,19 @@ const ROLE_BADGE_STYLE: Record<ColumnRole, string> = {
   buildingNo: 'bg-amber-100 text-amber-800',
 };
 
+type AiState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'done'; suggestions: Record<string, AiMappingSuggestion[]> };
+
 export default function ColumnMappingStep({
   sheets,
   mappings,
   onRoleChange,
   onConfirm,
 }: ColumnMappingStepProps) {
+  const [aiState, setAiState] = useState<AiState>({ status: 'idle' });
+
   const sheetInfos = useMemo(
     () => sheets.map((sheet) => extractSheetHeaderInfo(sheet)),
     [sheets],
@@ -37,18 +46,98 @@ export default function ColumnMappingStep({
 
   const mappableSheets = sheetInfos.filter((info) => info.sheetType !== 'cover-page');
 
+  const handleAiSuggest = useCallback(async () => {
+    setAiState({ status: 'loading' });
+    const suggestions: Record<string, AiMappingSuggestion[]> = {};
+
+    for (const info of mappableSheets) {
+      const sheetSuggestions = await suggestMappingWithAi(
+        info.headers,
+        info.sampleRow,
+        mappings[info.sheetName] ?? {},
+      );
+      if (sheetSuggestions.length > 0) {
+        suggestions[info.sheetName] = sheetSuggestions;
+      }
+    }
+
+    setAiState({ status: 'done', suggestions });
+  }, [mappableSheets, mappings]);
+
+  const handleAcceptSuggestion = useCallback(
+    (sheetName: string, suggestion: AiMappingSuggestion) => {
+      onRoleChange(sheetName, suggestion.header, suggestion.suggestedRole);
+      setAiState((current) => {
+        if (current.status !== 'done') {
+          return current;
+        }
+        const remaining = (current.suggestions[sheetName] ?? []).filter(
+          (s) => s.header !== suggestion.header,
+        );
+        return {
+          status: 'done',
+          suggestions: { ...current.suggestions, [sheetName]: remaining },
+        };
+      });
+    },
+    [onRoleChange],
+  );
+
+  const handleDismissSuggestion = useCallback((sheetName: string, header: string) => {
+    setAiState((current) => {
+      if (current.status !== 'done') {
+        return current;
+      }
+      const remaining = (current.suggestions[sheetName] ?? []).filter(
+        (s) => s.header !== header,
+      );
+      return {
+        status: 'done',
+        suggestions: { ...current.suggestions, [sheetName]: remaining },
+      };
+    });
+  }, []);
+
+  const totalSuggestions =
+    aiState.status === 'done'
+      ? Object.values(aiState.suggestions).reduce((sum, list) => sum + list.length, 0)
+      : 0;
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
-        <div className="flex items-start gap-3">
-          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Confirm Column Mapping</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Customer files use different column names. We&apos;ve automatically matched each
-              column below to a platform field — review and adjust if anything looks wrong before
-              continuing.
-            </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Confirm Column Mapping</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Customer files use different column names. We&apos;ve automatically matched each
+                column below to a platform field — review and adjust if anything looks wrong before
+                continuing.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1.5">
+            <button
+              type="button"
+              onClick={handleAiSuggest}
+              disabled={aiState.status === 'loading' || mappableSheets.length === 0}
+              title="Asks the AI assistant to propose roles for columns the automatic matcher left unmapped. Suggestions are never applied without your approval."
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {aiState.status === 'loading' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4" />
+              )}
+              {aiState.status === 'loading' ? 'Analyzing columns…' : 'Suggest with AI'}
+            </button>
+            {aiState.status === 'done' && totalSuggestions === 0 && (
+              <p className="text-xs text-slate-500">
+                No additional suggestions — unmapped columns don&apos;t resemble any platform field.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -64,6 +153,8 @@ export default function ColumnMappingStep({
         const columns = info.headers
           .map((header, index) => ({ header, sample: info.sampleRow[index] ?? '' }))
           .filter((column) => column.header);
+        const sheetSuggestions =
+          aiState.status === 'done' ? (aiState.suggestions[info.sheetName] ?? []) : [];
 
         return (
           <div
@@ -79,6 +170,50 @@ export default function ColumnMappingStep({
               </div>
               <span className="text-xs text-slate-500">{columns.length} columns</span>
             </div>
+
+            {sheetSuggestions.length > 0 && (
+              <div className="space-y-2 border-b border-violet-100 bg-violet-50/60 px-6 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                  AI suggestions — review before applying
+                </p>
+                {sheetSuggestions.map((suggestion) => (
+                  <div
+                    key={suggestion.header}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2"
+                  >
+                    <div className="text-sm text-slate-700">
+                      <span className="font-medium text-slate-900">{suggestion.header}</span>
+                      {' → '}
+                      <span className="font-medium text-violet-700">
+                        {COLUMN_ROLE_LABELS[suggestion.suggestedRole]}
+                      </span>
+                      <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
+                        {suggestion.confidence}% confident
+                      </span>
+                      <p className="mt-0.5 text-xs text-slate-500">{suggestion.rationale}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleAcceptSuggestion(info.sheetName, suggestion)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-700"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissSuggestion(info.sheetName, suggestion.header)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <table className="w-full text-sm">
               <thead>

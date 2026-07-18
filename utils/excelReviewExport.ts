@@ -3,37 +3,48 @@ import type { ParsedSheet, SheetData, WorkbookResult } from '../types';
 
 const REVIEW_STATUS_HEADER = 'Review Status';
 
-const ERROR_FILL: ExcelJS.Fill = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFFFC7CE' },
-};
-const ERROR_FONT: Partial<ExcelJS.Font> = { color: { argb: 'FF9C0006' } };
+type ReviewSeverity = 'error' | 'warning' | 'ready';
 
-const WARNING_FILL: ExcelJS.Fill = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFFFEB9C' },
+const SEVERITY_STYLES: Record<ReviewSeverity, { fill: ExcelJS.Fill; font: Partial<ExcelJS.Font> }> = {
+  error: {
+    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } },
+    font: { color: { argb: 'FF9C0006' } },
+  },
+  warning: {
+    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB9C' } },
+    font: { color: { argb: 'FF9C6500' } },
+  },
+  ready: {
+    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC6EFCE' } },
+    font: { color: { argb: 'FF006100' } },
+  },
 };
-const WARNING_FONT: Partial<ExcelJS.Font> = { color: { argb: 'FF9C6500' } };
 
-interface RowIssueSummary {
+interface RowReviewStatus {
   /** Worst severity found for this original row — determines the highlight color. */
-  severity: 'error' | 'warning';
-  /** Deduplicated, human-readable reasons, each already prefixed (Critical:/Warning:). */
+  severity: ReviewSeverity;
+  /** Deduplicated, human-readable reasons, each already prefixed (Critical:/Warning:), or ["Ready"]. */
   messages: string[];
 }
 
 /**
- * Groups a sheet's non-info validation errors by the *original file* row
+ * Builds a per-original-file-row review status map, keyed by the Excel row
  * number (`ImportReadyRow.sourceRowNumber`), not by the internal rows-array
  * index — a register-style sheet can expand one source row into several
- * parsed asset rows, and all of those need to land back on the same
- * original row when highlighting. Error-severity issues always win over
- * warning-severity ones for that row's color.
+ * parsed asset rows, and all of those need to land back on the same original
+ * row when highlighting. Every parsed data row starts as "ready" (green);
+ * warning issues escalate it to yellow and error issues to red, with errors
+ * always winning for that row's color. Non-data rows (titles, section
+ * dividers, blanks) never appear in the map and stay untouched.
  */
-function buildRowIssueMap(sheet: ParsedSheet): Map<number, RowIssueSummary> {
-  const map = new Map<number, RowIssueSummary>();
+function buildRowStatusMap(sheet: ParsedSheet): Map<number, RowReviewStatus> {
+  const map = new Map<number, RowReviewStatus>();
+
+  for (const row of sheet.rows) {
+    if (row.sourceRowNumber !== undefined && !map.has(row.sourceRowNumber)) {
+      map.set(row.sourceRowNumber, { severity: 'ready', messages: ['Ready'] });
+    }
+  }
 
   for (const error of sheet.errors) {
     if (error.severity === 'info') {
@@ -53,6 +64,12 @@ function buildRowIssueMap(sheet: ParsedSheet): Map<number, RowIssueSummary> {
       map.set(sourceRowNumber, { severity: error.severity, messages: [message] });
       continue;
     }
+
+    if (existing.severity === 'ready') {
+      existing.severity = error.severity;
+      existing.messages = [message];
+      continue;
+    }
     if (!existing.messages.includes(message)) {
       existing.messages.push(message);
     }
@@ -62,6 +79,80 @@ function buildRowIssueMap(sheet: ParsedSheet): Map<number, RowIssueSummary> {
   }
 
   return map;
+}
+
+/**
+ * Applies a highlight + review text to a cell without mutating shared style
+ * objects (exceljs deduplicates styles between cells, so assigning
+ * `cell.fill` directly can leak the highlight onto unrelated cells).
+ */
+function applyCellHighlight(
+  cell: ExcelJS.Cell,
+  fill: ExcelJS.Fill,
+  font: Partial<ExcelJS.Font>,
+): void {
+  cell.style = {
+    ...cell.style,
+    fill,
+    font: { ...(cell.style.font ?? {}), ...font },
+  };
+}
+
+/**
+ * Opens the exact workbook the user uploaded and edits it in place: every
+ * sheet, row, value, font, border, merge and column width stays as-is. The
+ * only changes are (per imported non-cover-page sheet) a trailing "Review
+ * Status" column and a row highlight — red for Blocked rows (with the
+ * critical reason(s)), yellow for Review Required rows (with the warning
+ * reason(s)), green for Ready rows. Non-data rows and sheets that weren't
+ * imported are left completely untouched.
+ */
+export async function buildAnnotatedWorkbookBuffer(
+  originalFile: ArrayBuffer,
+  workbook: WorkbookResult,
+): Promise<ArrayBuffer> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(originalFile);
+
+  for (const parsedSheet of workbook.sheets) {
+    if (parsedSheet.sheetType === 'cover-page') {
+      continue;
+    }
+    const worksheet = wb.getWorksheet(parsedSheet.name);
+    if (!worksheet) {
+      continue;
+    }
+
+    const statusMap = buildRowStatusMap(parsedSheet);
+    if (statusMap.size === 0) {
+      continue;
+    }
+
+    const reviewColumn = worksheet.columnCount + 1;
+
+    const headerCell = worksheet
+      .getRow(parsedSheet.headerRowIndex + 1)
+      .getCell(reviewColumn);
+    headerCell.value = REVIEW_STATUS_HEADER;
+    headerCell.style = {
+      ...headerCell.style,
+      font: { ...(headerCell.style.font ?? {}), bold: true },
+    };
+    worksheet.getColumn(reviewColumn).width = 48;
+
+    for (const [sourceRowNumber, status] of statusMap) {
+      const excelRow = worksheet.getRow(sourceRowNumber);
+      const { fill, font } = SEVERITY_STYLES[status.severity];
+
+      excelRow.getCell(reviewColumn).value = status.messages.join('; ');
+      for (let c = 1; c <= reviewColumn; c += 1) {
+        applyCellHighlight(excelRow.getCell(c), fill, font);
+      }
+    }
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  return buffer as ArrayBuffer;
 }
 
 /** Excel worksheet names: max 31 chars, no : \ / ? * [ ] , and must be unique within the workbook. */
@@ -79,13 +170,12 @@ function sanitizeSheetName(name: string, used: Set<string>): string {
 }
 
 /**
- * Rebuilds the workbook exactly as uploaded (same sheets, same row/column
- * values, same order) and adds one trailing "Review Status" column per
- * sheet: Blocked-severity rows get a red fill + the critical reason(s),
- * Review-Required rows get a yellow fill + the warning reason(s). Rows with
- * no open issues (including Ready rows and non-data rows like titles or
- * section headers) are left untouched. Cover Page is copied as-is — it has
- * no per-row asset data to annotate.
+ * Fallback for sources with no original .xlsx bytes to edit (CSV uploads,
+ * legacy .xls). Rebuilds the workbook from the parsed cell values — same
+ * sheets, same row/column values and order (original formatting doesn't
+ * exist for CSV and can't be read from legacy .xls) — and applies the same
+ * red/yellow/green highlights and "Review Status" column as
+ * `buildAnnotatedWorkbookBuffer`.
  */
 export async function buildReviewWorkbookBuffer(
   rawSheets: SheetData[],
@@ -100,7 +190,7 @@ export async function buildReviewWorkbookBuffer(
   for (const sheet of rawSheets) {
     const parsedSheet = workbook.sheets.find((s) => s.name === sheet.name);
     const canAnnotate = Boolean(parsedSheet) && parsedSheet!.sheetType !== 'cover-page';
-    const issueMap = canAnnotate ? buildRowIssueMap(parsedSheet!) : new Map<number, RowIssueSummary>();
+    const statusMap = canAnnotate ? buildRowStatusMap(parsedSheet!) : new Map<number, RowReviewStatus>();
     const headerRowIndex = canAnnotate ? parsedSheet!.headerRowIndex : -1;
 
     const worksheet = wb.addWorksheet(sanitizeSheetName(sheet.name, usedSheetNames));
@@ -128,21 +218,16 @@ export async function buildReviewWorkbookBuffer(
         return;
       }
 
-      const sourceRowNumber = rowIndex + 1;
-      const issue = issueMap.get(sourceRowNumber);
-      if (!issue) {
+      const status = statusMap.get(rowIndex + 1);
+      if (!status) {
         return;
       }
 
-      const fill = issue.severity === 'error' ? ERROR_FILL : WARNING_FILL;
-      const font = issue.severity === 'error' ? ERROR_FONT : WARNING_FONT;
-      const reasonCell = excelRow.getCell(values.length);
-      reasonCell.value = issue.messages.join('; ');
+      const { fill, font } = SEVERITY_STYLES[status.severity];
+      excelRow.getCell(values.length).value = status.messages.join('; ');
 
       for (let c = 1; c <= values.length; c += 1) {
-        const cell = excelRow.getCell(c);
-        cell.fill = fill;
-        cell.font = { ...cell.font, ...font };
+        applyCellHighlight(excelRow.getCell(c), fill, font);
       }
     });
 

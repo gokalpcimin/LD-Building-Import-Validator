@@ -5,6 +5,7 @@ import ColumnMappingStep from '../components/ColumnMappingStep';
 import DataPreviewTable from '../components/DataPreviewTable';
 import ExportForReviewButton from '../components/ExportForReviewButton';
 import FileUploader from '../components/FileUploader';
+import ImportReadyDownloadButton from '../components/ImportReadyDownloadButton';
 import PastedRegisterReview from '../components/PastedRegisterReview';
 import SheetPanel from '../components/SheetPanel';
 import ValidationReport from '../components/ValidationReport';
@@ -12,6 +13,7 @@ import type { ColumnRole, SheetColumnMapping, SheetData, WorkbookResult } from '
 import { buildDefaultWorkbookMapping } from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
 import { parsePastedRegister } from '../utils/pasteRegisterParser';
+import { buildImportReadyRows } from '../utils/importReadyExport';
 import { mergeAssetSheets, processWorkbook } from '../utils/processWorkbook';
 import { getSheetStatusLabel } from '../utils/validationEngine';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
@@ -42,6 +44,8 @@ export default function HomePage() {
   const [workbook, setWorkbook] = useState<WorkbookResult | null>(null);
   const [activeSheetName, setActiveSheetName] = useState('');
   const [fileName, setFileName] = useState<string | undefined>();
+  /** Untouched bytes of the uploaded .xlsx (undefined for CSV/.xls/paste) — lets Export for Review edit the real file so all original formatting survives. */
+  const [originalFile, setOriginalFile] = useState<ArrayBuffer | undefined>();
   const [needsManualAddress, setNeedsManualAddress] = useState(false);
   const [pasteAddress, setPasteAddress] = useState('');
 
@@ -57,6 +61,13 @@ export default function HomePage() {
     return mergeAssetSheets(workbook);
   }, [workbook]);
 
+  const importReadyRows = useMemo(() => {
+    if (!finalData) {
+      return [];
+    }
+    return buildImportReadyRows(finalData.rows, finalData.errors);
+  }, [finalData]);
+
   // Pasted building-register text is semi-structured free text, not a
   // column grid — it gets its own dedicated parsing engine and review
   // screen instead of going through column mapping / the Excel parsers.
@@ -67,20 +78,24 @@ export default function HomePage() {
     return parsePastedRegister(rawSheets[0].data, pasteAddress);
   }, [rawSheets, pasteAddress]);
 
-  const handleDataLoaded = useCallback((sheets: SheetData[], loadedFileName?: string) => {
-    setRawSheets(sheets);
-    setFileName(loadedFileName);
-    setWorkbook(null);
+  const handleDataLoaded = useCallback(
+    (sheets: SheetData[], loadedFileName?: string, loadedOriginalFile?: ArrayBuffer) => {
+      setRawSheets(sheets);
+      setFileName(loadedFileName);
+      setOriginalFile(loadedOriginalFile);
+      setWorkbook(null);
 
-    if (isPasteSourced(sheets)) {
-      setPasteAddress('');
-      setStep('pasteReview');
-      return;
-    }
+      if (isPasteSourced(sheets)) {
+        setPasteAddress('');
+        setStep('pasteReview');
+        return;
+      }
 
-    setColumnMappings(buildDefaultWorkbookMapping(sheets));
-    setStep('mapping');
-  }, []);
+      setColumnMappings(buildDefaultWorkbookMapping(sheets));
+      setStep('mapping');
+    },
+    [],
+  );
 
   const handleMappingRoleChange = useCallback(
     (sheetName: string, header: string, role: ColumnRole) => {
@@ -135,6 +150,7 @@ export default function HomePage() {
     setWorkbook(null);
     setActiveSheetName('');
     setFileName(undefined);
+    setOriginalFile(undefined);
     setNeedsManualAddress(false);
     setPasteAddress('');
   }, []);
@@ -376,11 +392,15 @@ export default function HomePage() {
                       : `Parsed ${finalData.rows.length} asset rows. Review the summary and preview below.`}
                   </p>
                 </div>
-                <ExportForReviewButton
-                  rawSheets={rawSheets}
-                  workbook={workbook}
-                  fileName={fileName}
-                />
+                <div className="flex flex-wrap items-start justify-end gap-3">
+                  <ImportReadyDownloadButton rows={importReadyRows} fileName={fileName} />
+                  <ExportForReviewButton
+                    rawSheets={rawSheets}
+                    workbook={workbook}
+                    fileName={fileName}
+                    originalFile={originalFile}
+                  />
+                </div>
               </div>
             </div>
 

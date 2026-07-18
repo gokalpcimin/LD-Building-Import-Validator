@@ -1,7 +1,9 @@
 'use client';
 
 import BuildingAddressPanel from './BuildingAddressPanel';
+import ImportReadyDownloadButton from './ImportReadyDownloadButton';
 import ValidationReport from './ValidationReport';
+import { buildImportReadyRowsFromPaste } from '../utils/importReadyExport';
 import type { FieldConfidence, PastedAssetRow, PasteParseSummary } from '../utils/pasteRegisterParser';
 import { AlertTriangle, CheckCircle2, ClipboardList, Pencil, ShieldX } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -90,6 +92,11 @@ export default function PastedRegisterReview({
   const displayedRows =
     activeTab === 'ready' ? readyRows : activeTab === 'review' ? reviewRows : blockedRows;
 
+  const importReadyRows = useMemo(
+    () => buildImportReadyRowsFromPaste(rowsWithAddress),
+    [rowsWithAddress],
+  );
+
   const kpiSummary = {
     totalImported: summary.totalRows,
     distinctLocationsCount: summary.distinctLocations,
@@ -126,12 +133,15 @@ export default function PastedRegisterReview({
       <ValidationReport summary={kpiSummary} />
 
       <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-6 py-5">
-          <h2 className="text-lg font-semibold text-slate-900">Import Ready Preview</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Parsed rows classified as Ready, Review Required or Blocked — nothing is silently marked
-            import-ready when the underlying detection is uncertain.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Import Ready Preview</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Parsed rows classified as Ready, Review Required or Blocked — nothing is silently
+              marked import-ready when the underlying detection is uncertain.
+            </p>
+          </div>
+          <ImportReadyDownloadButton rows={importReadyRows} fileName="pasted-data" />
         </div>
 
         <div className="flex gap-1 border-b border-slate-200 px-6 pt-4">

@@ -4,6 +4,27 @@ A prototype tool for support/back-office teams to parse Legionella risk assessme
 
 Built as a technical case study using **TypeScript**, **Node.js**, **Next.js**, and **React**.
 
+## Case brief → feature traceability
+
+| Brief requirement | Where it lives |
+|---|---|
+| Upload or paste a file | Upload Data step — Upload File + Paste Data tabs (`components/FileUploader.tsx`) |
+| Mapping step (manual / automatic / AI-assisted / mocked) | Column Mapping step: automatic keyword matching + per-column manual override + **"Suggest with AI"** (mocked LLM with confidence & rationale, human-approved) |
+| Import-ready file: Address, Asset/Outlet type, Floor, Room, Unit | **Download Import-Ready File** button — CSV with exactly those fields (+ Quantity); Blocked rows excluded (`utils/importReadyExport.ts`) |
+| Cleaned preview of import-ready data | Import Ready Preview — Ready / Review Required / Blocked tabs (`components/DataPreviewTable.tsx`) |
+| Number of assets imported | "Assets Imported" KPI card (`components/ValidationReport.tsx`) |
+| Number of distinct locations | "Distinct Locations" KPI card |
+| Gaps or uncertainties | "Critical Errors" + "Uncertainties (Warnings)" KPIs, per-row Issues / Parsing Notes badges, and the annotated **Export for Review** workbook |
+| TypeScript / Node.js / Next.js / React / README | This repository |
+
+## Balancing AI/automation with human review
+
+The guiding rule everywhere is **correct structured data > guessing > validation warning** — the tool never invents data, and nothing uncertain is silently marked import-ready:
+
+- **Automation proposes, the human approves.** Column mapping is auto-detected but shown for confirmation; AI mapping suggestions come with a confidence score and rationale, and are never applied without an explicit click.
+- **Every automatic inference is visible.** When the parser extracts a floor from raw text or resolves the abbreviation "WM" to Washing Machine, that shows up as a blue Parsing Note on the row — transparent, but not a reason to block.
+- **Uncertainty degrades gracefully.** Confidently parsed rows are Ready; a single missing location field means Review Required (a human looks); unknown asset types or badly incomplete locations mean Blocked (kept out of the import-ready file entirely, and highlighted with reasons in the Export for Review workbook).
+
 ## Problem
 
 Customer files are not simple building lists — they are Legionella risk assessment reports with different sheets and structures (Cover Page, Monthly Outlet, Annual TMVs, Expansion Vessels, Outlet & Temperature Registers), and different customers name their columns differently (`Outlet/Location` vs. `Level` + `Area` vs. `Building Address`, etc.). Some sheets aren't even cleanly tabular — asset registers frequently flatten `[Building No] [Floor] [Room] ...readings... [asset code]` into a single line of raw text. The team needs to:
@@ -21,6 +42,7 @@ Customer files may use different column names for the same concept (`Building Ad
 
 - Every column of every uploaded sheet is automatically matched to a platform field — `Address`, `Asset / Outlet Type`, `Location` (combined text parsed into Unit/Floor/Room), `Floor`, `Room`, `Unit`, `Building No`, or `Ignore` — using keyword + pattern detection (`utils/columnMapping.ts`). `Building No` is kept distinct from `Unit`: a register's Building No → Floor → Room hierarchy doesn't imply the sheet has a Unit concept at all.
 - The user sees this mapping (with a sample value per column) and can override any column via a dropdown before continuing — this is the "manual override" half of the automatic/AI-assisted/mocked/manual mapping spectrum the mapping step supports.
+- **AI-assisted suggestions:** a "Suggest with AI" button proposes roles for columns the deterministic matcher left unmapped — synonyms ("Storey" → Floor, "Apartment" → Unit), abbreviations ("Bldg" → Building No) and sample-value cues ("Bib Tap" in the data → Asset Type). Each suggestion shows a confidence score and a one-line rationale, and is applied only when the user clicks Apply. The suggester (`utils/aiMappingSuggester.ts`) is a **mock** of an LLM call with the exact async signature a real integration would have, so swapping in a real model call changes nothing else in the app.
 - The confirmed mapping is threaded into `dataSheetParser.ts` via `ParserContext.columnMapping`, so parsing always uses exactly what the user confirmed, not just a hidden guess.
 - Example: a file with `Building Address / Equipment / Level / Area` columns is auto-mapped to `Address / Asset Type / Floor / Room` — no manual work needed. The real case-study file (`Outlet/Location`, `TMV / Location`, `Expansion Vessel / Location` combined-text columns) is also auto-mapped correctly out of the box.
 
@@ -120,16 +142,29 @@ Unit is only validated on sheets that actually have a Unit concept (an explicit 
 
 Each row gets one of three import statuses: **Blocked** (any Error), **Review Required** (no Error, but at least one Warning), or **Ready** (no Error or Warning — Info notes don't count). The KPI cards and the Import Ready Preview tabs both count rows this way, so the same underlying data reads identically whether it came from an uploaded file or was pasted.
 
+## Import-ready file (the clean deliverable)
+
+The **Download Import-Ready File** button (on the final Import Ready step, and on the pasted-data review screen) produces the CSV the platform would actually ingest — exactly the fields the case brief lists:
+
+| Address | Asset Type | Floor | Room | Unit | Quantity |
+|---|---|---|---|---|---|
+
+- **Ready and Review Required rows are included; Blocked rows are excluded** — a record with an unknown asset type or a hopelessly incomplete location would just push the data gap downstream.
+- Register hierarchies without a Unit concept export their Building No as the Unit, keeping the location triple complete.
+- In the paste flow, rows with multiple detected assets ("Bath+SH head, WC") expand into one record per asset.
+- Implemented in `utils/importReadyExport.ts` / `components/ImportReadyDownloadButton.tsx`.
+
 ## Export for Review
 
-From the final "Import Ready" step (Excel/CSV flow only — not the paste flow), an **Export for Review** button rebuilds the exact workbook that was uploaded — same sheets, same row/column values and order — and adds one thing per sheet: a trailing **Review Status** column.
+From the final "Import Ready" step (Excel/CSV flow only — not the paste flow), an **Export for Review** button downloads the workbook with per-row review annotations. For `.xlsx` uploads the untouched original file bytes are kept in memory and the export **edits that exact file in place** — every font, color, border, merged cell, column width and sheet stays as uploaded. The only changes per imported sheet are a trailing **Review Status** column and a row highlight:
 
-- Rows that are **Blocked** get a red row highlight and a `Critical: ...` reason in that column (e.g. `Critical: Asset type could not be confidently classified`).
-- Rows that are **Review Required** get a yellow row highlight and a `Warning: ...` reason (e.g. `Warning: Missing floor`).
-- Rows with no open issues (including non-data rows like section headers) are left completely untouched — no color, no text.
-- Cover Page is copied as-is (no per-row asset data to annotate).
+- **Blocked** rows get a red highlight and a `Critical: ...` reason (e.g. `Critical: Asset type could not be confidently classified`).
+- **Review Required** rows get a yellow highlight and a `Warning: ...` reason (e.g. `Warning: Missing floor`).
+- **Ready** rows get a green highlight and the text `Ready`.
+- Non-data rows (titles, section headers, blanks) are left completely untouched.
+- Cover Page and any sheets that weren't imported are copied as-is.
 
-This lets a reviewer open the export in Excel and immediately scan for red/yellow rows and see *why*, without changing anything else about the file. Implemented in `utils/excelReviewExport.ts` (uses `exceljs` to write real cell fills/fonts, unlike the plain CSV read path used elsewhere) and wired up via `components/ExportForReviewButton.tsx`.
+CSV and legacy `.xls` uploads have no original formatting to preserve, so they fall back to rebuilding the workbook from the parsed values with the same highlights. This lets a reviewer open the export in Excel and immediately scan row colors and see *why*, with the file otherwise identical to what they sent. Implemented in `utils/excelReviewExport.ts` (uses `exceljs` to load and edit the original workbook); the .xlsx annotation runs server-side via `app/api/export-review/route.ts` because exceljs's browser build hangs loading real-world workbooks, and the button lives in `components/ExportForReviewButton.tsx`.
 
 ## Features
 
@@ -137,6 +172,8 @@ This lets a reviewer open the export in Excel and immediately scan for red/yello
 - Automatic sheet classification (Cover Page, Monthly Outlet, TMVs, Expansion Vessels, Asset Register, Unknown)
 - Multi-sheet Excel support with a sheet picker (all sheets selected by default)
 - **Column Mapping step**: every column auto-matched to a platform field, editable per column, so customer files with renamed columns (`Level`/`Area` instead of `Floor`/`Room`, a separate `Building No` column, etc.) import correctly
+- **AI-assisted mapping (mocked LLM)**: "Suggest with AI" proposes roles for unmapped columns with confidence + rationale; user applies or dismisses each suggestion
+- **Download Import-Ready File**: clean CSV with the platform fields (Address, Asset Type, Floor, Room, Unit, Quantity) — Ready + Review Required rows only, available in both the Excel and paste flows
 - Sheet-aware parsing: asset registers get `[Building No] + [Floor] + [Room]` decomposition from raw text; monitoring sheets treat repeated locations as normal history, not duplicates
 - Reusable location parser (`unit`, `floor`, `room` from text like `Unit 3 - 1st Floor Finance Office`, or register lines like `1 Ground Residential Laundry - ... WM`)
 - Expanded, keyword + abbreviation + comment-based asset detection: Bib Tap, WC, Shower, WHB/Sink, Expansion Vessel, TMV, Washing Machine, Dishwasher, Water Boiler, Calorifier, Chilled Water Dispenser/Fountain, Water Fountain, Spray Outlet, Emergency Shower/Eyewash, Chiller Unit, Hot Drinks Machine, Ice Machine, Unknown
@@ -147,7 +184,7 @@ This lets a reviewer open the export in Excel and immediately scan for red/yello
 - Single address input on Cover Page when auto-detection fails
 - Horizontal sheet tabs — one navigation system
 - **Import Ready Preview**: Ready / Review Required / Blocked tabs, each a detailed table (Sheet, Row #, Address, Building No, Unit, Floor, Room, Asset Type, Quantity, Original Raw Text, Issues, Parsing Notes) for tracing records back to the source file
-- **Export for Review** (Excel/CSV flow): downloads the original workbook unchanged, plus a trailing "Review Status" column and a red/yellow row highlight on Blocked/Review Required rows — see [Export for Review](#export-for-review)
+- **Export for Review** (Excel/CSV flow): downloads the original workbook with all its formatting intact (for .xlsx), plus a trailing "Review Status" column and red/yellow/green row highlights for Blocked/Review Required/Ready rows — see [Export for Review](#export-for-review)
 - Back button + clickable stepper for free navigation between Upload / Column Mapping / Review Sheets / Import Ready without losing data
 
 ## Tech stack
@@ -191,21 +228,24 @@ npx tsx scripts/test-case-workflow.mjs "/path/to/Risk Assessment input for case 
 app/page.tsx                    # 4-step workflow orchestration
 components/
   FileUploader.tsx              # Upload / paste ingestion + multi-sheet picker
-  ColumnMappingStep.tsx         # "Column Mapping" — auto-detected, per-column overrides
+  ColumnMappingStep.tsx         # "Column Mapping" — auto-detected, per-column overrides + AI suggestions
   SheetPanel.tsx                # Per-sheet interpretation + preview
   ValidationReport.tsx          # KPI summary cards ("Validation Review")
   DataPreviewTable.tsx          # "Import Ready Preview" — Ready / Review Required / Blocked table
+  ImportReadyDownloadButton.tsx # "Download Import-Ready File" — clean 5-field CSV
   ExportForReviewButton.tsx     # "Export for Review" button (Excel/CSV flow)
 types/index.ts                  # Shared TypeScript types (ImportReadyRow, ImportStatus, ColumnRole, ...)
 utils/
   sheetDetection.ts             # Classify sheets by name
   columnMapping.ts              # Auto-detect + apply column-to-field role mapping
+  aiMappingSuggester.ts         # Mocked LLM mapping suggestions (confidence + rationale, human-approved)
+  importReadyExport.ts          # Builds + downloads the clean import-ready CSV
   locationParser.ts             # Reusable unit/floor/room parsing + parseBuildingRegisterLine
   assetDetector.ts              # Keyword/abbreviation/comment asset recognition, multi-asset extraction
   validationEngine.ts           # Import readiness validation (Ready/Review Required/Blocked)
   headerDetection.ts            # Smart header row detection, section-divider/unit inheritance
   processWorkbook.ts            # Orchestrates full pipeline
-  excelReviewExport.ts          # Rebuilds the uploaded workbook with row highlights + Review Status column
+  excelReviewExport.ts          # Edits the original .xlsx in place (formatting preserved) with row highlights + Review Status column; rebuild fallback for CSV/.xls
   parsers/
     coverPageParser.ts
     monthlyOutletParser.ts       # Historical monitoring — repeats are not duplicates
