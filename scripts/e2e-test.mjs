@@ -109,8 +109,8 @@ assert(
 );
 const monthlyErrors = monthly?.errors.filter((e) => e.severity === 'error').length ?? -1;
 const monthlyWarnings = monthly?.errors.filter((e) => e.severity === 'warning').length ?? -1;
-assert(monthlyErrors > 0, `Monthly Outlet: ${monthlyErrors} critical errors (unknown asset = blocked)`);
-assert(monthlyWarnings > 0, `Monthly Outlet: ${monthlyWarnings} warnings for review`);
+assert(monthlyErrors > 0, `Monthly Outlet: ${monthlyErrors} critical errors (e.g. incomplete location)`);
+assert(monthlyWarnings > 0, `Monthly Outlet: ${monthlyWarnings} warnings for review (unknown/soft assets)`);
 
 const sampleRow = monthly?.rows.find((r) => r.rawText?.includes('Finance Office'));
 if (sampleRow) {
@@ -152,7 +152,14 @@ assert(loc2.room === 'Finance Office', `Room from dash format: "${loc2.room}"`);
 console.log('\nSTEP 8 — Asset recognition layer');
 assert(detectAssetType(['Bib Tap']).assetType === 'Bib Tap', 'Detects Bib Tap');
 assert(detectAssetType(['toilet']).assetType === 'WC', 'Detects WC from toilet');
+assert(detectAssetType(['Toilets']).assetType === 'WC', 'Detects WC from Toilets');
+assert(detectAssetType(['Tuvalet']).assetType === 'WC', 'Detects WC from Turkish Tuvalet');
 assert(detectAssetType(['wash hand basin']).assetType === 'WHB', 'Detects WHB');
+assert(detectAssetType(['Bathroom']).assetType === 'Shower', 'Infers Shower from Bathroom location');
+assert(
+  detectAssetType(['Bathroom']).inferredFromLocation === true,
+  'Bathroom location inference is soft (review, not ready)',
+);
 assert(detectAssetType(['unknown thing']).assetType === 'Unknown', 'Unknown for unrecognized');
 assert(detectAssetType(['location'], 'annual-tmv').assetType === 'TMV', 'Forced TMV from sheet type');
 
@@ -160,8 +167,9 @@ assert(detectAssetType(['location'], 'annual-tmv').assetType === 'TMV', 'Forced 
 console.log('\nSTEP 9 — Validation engine (errors vs warnings)');
 const final = mergeAssetSheets(wb);
 assert(final.rows.length === 362, `Final merge: 362 asset rows (got ${final.rows.length})`);
-assert(final.summary.distinctLocationsCount === 78, `78 distinct locations (got ${final.summary.distinctLocationsCount})`);
-assert(final.summary.totalErrors > 0, `${final.summary.totalErrors} blocked rows when unknown assets are critical`);
+// Unit section headings (e.g. "Unit 3", "Unit 14/15") are inherited onto rows below them.
+assert(final.summary.distinctLocationsCount === 72, `72 distinct locations (got ${final.summary.distinctLocationsCount})`);
+// Unknown assets are Review Required (warning), not hard-blocked.
 assert(final.summary.totalWarnings > 0, `${final.summary.totalWarnings} review-required rows total`);
 
 // All rows should have address from cover page
@@ -283,15 +291,15 @@ const overriddenWorkbook = processWorkbook(renamedColumnsSheets, {
 });
 assert(
   overriddenWorkbook.sheets[0].rows[0].assetType === 'Unknown',
-  'Manual override: ignoring the Equipment column yields Unknown asset type (blocked)',
+  'Manual override: ignoring the Equipment column yields Unknown asset type',
 );
 const overriddenStatus = groupRowsByImportStatus(
   overriddenWorkbook.sheets[0].rows,
   overriddenWorkbook.sheets[0].errors,
 );
 assert(
-  overriddenStatus.blockedRows.length === 2,
-  'Manual override: Unknown asset type blocks every row on the sheet',
+  overriddenStatus.reviewRows.length === 2 && overriddenStatus.blockedRows.length === 0,
+  'Manual override: Unknown asset type goes to Review Required (not Blocked)',
 );
 
 // ─── STEP 14: Paste Data — outlet register format ───────────────────────────

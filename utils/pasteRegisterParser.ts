@@ -1,12 +1,23 @@
+import {
+  alignOutletRegisterFields,
+  outletCountValue,
+  splitLocationAndFields,
+  toOutletRegisterColumns,
+  type OutletRegisterColumns,
+} from './outletRegisterLineParser';
+
+export type { OutletRegisterColumns };
+
 /**
  * Dedicated, self-contained parsing engine for the Copy & Paste import path
  * ONLY. It intentionally does not import from dataSheetParser.ts,
  * headerDetection.ts, locationParser.ts, assetDetector.ts or
  * validationEngine.ts — those are shared with the Excel/CSV pipeline and
- * must stay untouched. Every heuristic needed here (section inheritance,
- * building-number/floor/room decomposition, asset classification, duplicate
- * detection) is reimplemented locally so this file can evolve freely
- * without any risk of changing Excel import behaviour.
+ * must stay untouched. Column alignment for Outlet & Temperature Register
+ * rows lives in outletRegisterLineParser.ts; everything else needed here
+ * (section inheritance, room decomposition, asset classification, duplicate
+ * detection) stays local so this file can evolve freely without changing
+ * Excel import behaviour.
  *
  * Guiding rule: correct structured data > guessing > validation warning.
  * Never invent data — if a field can't be confidently extracted, it is
@@ -36,6 +47,8 @@ export interface DetectedAsset {
   assetType: string;
   confidence: number;
   source: string;
+  /** Explicit count when known (e.g. Sink column = 2, or "2 x WM"). */
+  quantity?: number;
 }
 
 export type IssueSeverity = 'critical' | 'warning';
@@ -63,6 +76,11 @@ export interface PastedAssetRow {
   assetType: FieldConfidence<string>;
   detectedAssets?: DetectedAsset[];
   quantity: FieldConfidence<number>;
+  /**
+   * Fixed Outlet & Temperature Register columns aligned from the raw line
+   * (Sink, Whb, Shower, TMVs No., Cold Source, …). Displayed in paste review.
+   */
+  registerColumns?: OutletRegisterColumns;
   rawText: string;
   importStatus: ImportStatus;
   issues: PasteIssue[];
@@ -171,9 +189,9 @@ function isNoiseLine(line: string): boolean {
   if (NOTE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))) {
     return true;
   }
-  if (PURE_FLOOR_LINE_PATTERN.test(trimmed)) {
-    return true;
-  }
+  // Pure floor lines ("Ground", "First Floor") are handled in the parse
+  // loop as pendingFloor — do NOT drop them here or Staff Laundry-style
+  // column wraps lose their floor forever.
   // A long, digit-free sentence reads like prose/instructions, not a data
   // row — genuine register rows almost always carry a number somewhere
   // (a building no, a reading, a count).
@@ -276,6 +294,103 @@ function looksLikeRoomName(text: string): boolean {
 
 /** Matches a lone "<Building No> Lower" line — the "Ground" half of "Lower Ground" landed on the next physical line during copy/paste. */
 const LOWER_GROUND_WRAP_PATTERN = /^(\d+[A-Za-z]?)\s+Lower$/i;
+
+/** A lone building number on its own wrapped line (e.g. "1" above "Staff Laundry"). */
+const LONE_BUILDING_NUMBER_PATTERN = /^(\d+[A-Za-z]?)$/;
+
+/**
+ * Only these register columns become assets (plus free-text / vending comments).
+ * Hot Source, temps, biocide, scale, etc. are parsed for alignment but never
+ * turned into assets. Cold Source is included (e.g. plant room → Cold Source ×1).
+ */
+const REGISTER_ASSET_COLUMNS = [
+  { key: 'coldSource' as const, assetType: 'Cold Source', label: 'Cold Source' },
+  { key: 'sink' as const, assetType: 'Sink', label: 'Sink' },
+  { key: 'whb' as const, assetType: 'Wash Hand Basin', label: 'Whb' },
+  { key: 'shower' as const, assetType: 'Shower', label: 'Shower' },
+  { key: 'tmvsNo' as const, assetType: 'TMV', label: 'TMVs No.' },
+  { key: 'sprayOutlets' as const, assetType: 'Spray Outlet', label: 'Spray Outlets' },
+  { key: 'deadLegs' as const, assetType: 'Dead Leg', label: 'Dead Legs' },
+  { key: 'flexibleHoses' as const, assetType: 'Flexible Hose', label: 'Flexible Hoses' },
+] as const;
+
+/** Count-column assets that must never be dropped as "Cold Source bleed". */
+const PROTECTED_REGISTER_ASSETS = new Set([
+  'Cold Source',
+  'Spray Outlet',
+  'Dead Leg',
+  'Flexible Hose',
+]);
+
+function parseRegisterColumnsFromTail(tailAfterRoom: string): {
+  columns: OutletRegisterColumns;
+  countAssets: DetectedAsset[];
+} {
+  const { fieldTokens, comments } = splitLocationAndFields(tailAfterRoom);
+  const aligned = alignOutletRegisterFields(fieldTokens);
+  const columns = toOutletRegisterColumns(aligned, comments);
+
+  const countAssets: DetectedAsset[] = [];
+
+  // Sentinel Asset: inventory only when the cell is a positive count (not Y/N/F flags).
+  const sentinelAssetCount = outletCountValue(aligned.sentinelAsset);
+  if (sentinelAssetCount > 0) {
+    countAssets.push({
+      assetType: 'Sentinel Asset',
+      confidence: 100,
+      source: `Detected from register Sentinel Asset column (${sentinelAssetCount})`,
+      quantity: sentinelAssetCount,
+    });
+  }
+
+  for (const { key, assetType, label } of REGISTER_ASSET_COLUMNS) {
+    const count = outletCountValue(aligned[key]);
+    if (count <= 0) {
+      continue;
+    }
+    countAssets.push({
+      assetType,
+      confidence: 100,
+      source: `Detected from register ${label} column (${count})`,
+      quantity: count,
+    });
+  }
+
+  return { columns, countAssets };
+}
+
+/**
+ * Multi-word asset phrases are safe to match in full-line text (including
+ * wrapped comments). Short abbreviations stay on the plausible-segment
+ * scanner so "via TMV" does not become an asset.
+ */
+const FULL_TEXT_ASSET_RULES: AssetRule[] = [
+  { assetType: 'Bib Tap', confidence: 100, source: 'Detected from keyword "Bib Tap"', pattern: /\bbib\s*taps?\b/i },
+  {
+    assetType: 'Panamatic',
+    confidence: 95,
+    source: 'Detected from keyword Panamatic',
+    pattern: /\bpan[ao]matic\b/i,
+  },
+  {
+    assetType: 'Calorifier',
+    confidence: 95,
+    source: 'Detected from keyword Calorifier',
+    pattern: /\bcalorifiers?\b/i,
+  },
+  {
+    assetType: 'Spray Outlet',
+    confidence: 95,
+    source: 'Detected from pattern "Spray head"',
+    pattern: /\bspray\s*head\b/i,
+  },
+  {
+    assetType: 'Cold Water Dispenser',
+    confidence: 95,
+    source: 'Detected from pattern "Chilled Cold Water Dispenser"',
+    pattern: /\bchilled\s+(?:cold\s+)?water\s+dispenser\b/i,
+  },
+];
 
 // ─────────────────────────────────────────────────────────────────────────
 // Asset dictionary — expanded per the confidence-based validation pass.
@@ -388,7 +503,7 @@ function findAllAssetMatchesInPlausibleSegments(text: string): DetectedAsset[] {
   const found: DetectedAsset[] = [];
   const seen = new Set<string>();
 
-  for (const segment of text.split(',')) {
+  for (const segment of text.split(/[,/]/)) {
     if (!looksLikeRoomName(segment)) {
       continue;
     }
@@ -400,6 +515,19 @@ function findAllAssetMatchesInPlausibleSegments(text: string): DetectedAsset[] {
         found.push({ assetType: rule.assetType, confidence: rule.confidence, source: rule.source });
         seen.add(rule.assetType);
       }
+    }
+  }
+
+  // Multi-word phrases (Bib Tap, Spray head, …) are unambiguous even inside
+  // a wrapped comment sentence — pick them up from the full line after the
+  // segment scan so "courtyard for Bib Tap x 1" is not lost.
+  for (const rule of FULL_TEXT_ASSET_RULES) {
+    if (seen.has(rule.assetType)) {
+      continue;
+    }
+    if (rule.pattern.test(text)) {
+      found.push({ assetType: rule.assetType, confidence: rule.confidence, source: rule.source });
+      seen.add(rule.assetType);
     }
   }
 
@@ -428,7 +556,7 @@ function scanAssetsAndQuantity(text: string): AssetScanResult {
     const matches = findAllAssetMatches(forwardQuantityMatch[2]);
     if (matches.length === 1) {
       return {
-        assets: matches,
+        assets: matches.map((match) => ({ ...match, quantity })),
         quantity: { value: quantity, confidence: 95, source: 'Quantity extracted from description' },
       };
     }
@@ -440,7 +568,7 @@ function scanAssetsAndQuantity(text: string): AssetScanResult {
     const matches = findAllAssetMatches(reversedQuantityMatch[1]);
     if (matches.length === 1) {
       return {
-        assets: matches,
+        assets: matches.map((match) => ({ ...match, quantity })),
         quantity: { value: quantity, confidence: 95, source: 'Quantity extracted from description' },
       };
     }
@@ -475,33 +603,149 @@ interface WorkingRow {
   assetType: FieldConfidence<string>;
   detectedAssets?: DetectedAsset[];
   quantity: FieldConfidence<number>;
+  registerColumns?: OutletRegisterColumns;
   rawText: string;
   /** Accumulates every merged wrapped-line fragment so a late-arriving asset mention can be re-scanned against the full text. */
   assetScanText: string;
 }
 
-function applyAssetScan(row: WorkingRow): void {
-  const scan = scanAssetsAndQuantity(row.assetScanText);
+/**
+ * Comment-named appliances that usually ARE the row's asset. A lone
+ * Sink/Whb/TMV count of 1 beside them can be mis-aligned paste noise —
+ * keep Cold Source / spray / hose column assets, drop only weak basin/TMV.
+ */
+const STANDALONE_OUTLET_ASSETS = new Set([
+  'Cold Water Dispenser',
+  'Chilled Water Fountain',
+  'Water Fountain',
+  'Ice Machine',
+  'Hot Drinks Machine',
+  'Calorifier',
+]);
 
-  if (scan.assets.length === 0) {
+function filterAmbiguousCountAssets(
+  textAssets: DetectedAsset[],
+  countAssets: DetectedAsset[],
+): DetectedAsset[] {
+  if (textAssets.length === 0 || countAssets.length === 0) {
+    return countAssets;
+  }
+
+  const protectedAssets = countAssets.filter((asset) =>
+    PROTECTED_REGISTER_ASSETS.has(asset.assetType),
+  );
+  const mutable = countAssets.filter((asset) => !PROTECTED_REGISTER_ASSETS.has(asset.assetType));
+
+  if (!textAssets.every((asset) => STANDALONE_OUTLET_ASSETS.has(asset.assetType))) {
+    return countAssets;
+  }
+  if (mutable.some((asset) => asset.assetType === 'Shower' && (asset.quantity ?? 0) > 0)) {
+    return countAssets;
+  }
+  const onlyWeakBasinOrTmv =
+    mutable.length > 0 &&
+    mutable.every(
+      (asset) =>
+        (asset.assetType === 'Sink' ||
+          asset.assetType === 'Wash Hand Basin' ||
+          asset.assetType === 'TMV') &&
+        (asset.quantity ?? 1) <= 1,
+    );
+  return onlyWeakBasinOrTmv ? protectedAssets : countAssets;
+}
+
+function applyAssetScan(row: WorkingRow): void {
+  const textScan = scanAssetsAndQuantity(row.assetScanText);
+  const roomValue = row.room.value ?? '';
+  const tailAfterRoom = roomValue
+    ? row.assetScanText.replace(roomValue, '').replace(/^\s*/, '')
+    : row.assetScanText;
+
+  const { columns, countAssets: rawCountAssets } = parseRegisterColumnsFromTail(tailAfterRoom);
+  row.registerColumns = columns;
+
+  // Merge vending/comments text with allow-listed register count columns.
+  // Text wins on type collisions. Multi-asset rows expand on export.
+  const countAssets = filterAmbiguousCountAssets(textScan.assets, rawCountAssets);
+
+  const mergedAssets: DetectedAsset[] = [];
+  const seen = new Set<string>();
+  for (const asset of [...textScan.assets, ...countAssets]) {
+    if (seen.has(asset.assetType)) {
+      continue;
+    }
+    seen.add(asset.assetType);
+    mergedAssets.push(asset);
+  }
+
+  // Prefer Bath/Shower from comments over bare Shower column when both appear.
+  if (
+    mergedAssets.some((asset) => asset.assetType === 'Bath/Shower') &&
+    mergedAssets.some((asset) => asset.assetType === 'Shower')
+  ) {
+    const shower = mergedAssets.find((asset) => asset.assetType === 'Shower');
+    const bath = mergedAssets.find((asset) => asset.assetType === 'Bath/Shower');
+    if (shower && bath) {
+      bath.quantity = Math.max(bath.quantity ?? 1, shower.quantity ?? 1);
+      const idx = mergedAssets.indexOf(shower);
+      if (idx >= 0) {
+        mergedAssets.splice(idx, 1);
+      }
+    }
+  }
+
+  if (mergedAssets.length === 0) {
     row.assetType = { value: null, confidence: 30, source: 'No identifiable asset type detected' };
     row.detectedAssets = undefined;
-  } else if (scan.assets.length === 1) {
-    const [only] = scan.assets;
+  } else if (mergedAssets.length === 1) {
+    const [only] = mergedAssets;
     row.assetType = { value: only.assetType, confidence: only.confidence, source: only.source };
-    row.detectedAssets = undefined;
+    // Keep detectedAssets so the UI can show "Calorifier ×2" under Asset Type.
+    row.detectedAssets = mergedAssets;
   } else {
     row.assetType = {
       value: 'Multiple Assets',
-      confidence: Math.min(...scan.assets.map((asset) => asset.confidence)),
-      source: `Multiple assets detected: ${scan.assets.map((asset) => asset.assetType).join(', ')}`,
+      confidence: Math.min(...mergedAssets.map((asset) => asset.confidence)),
+      source: `Multiple assets detected: ${mergedAssets.map((asset) => asset.assetType).join(', ')}`,
     };
-    row.detectedAssets = scan.assets;
+    row.detectedAssets = mergedAssets;
   }
 
-  row.quantity = scan.quantity
-    ? { value: scan.quantity.value, confidence: scan.quantity.confidence, source: scan.quantity.source }
-    : { value: null, confidence: 0, source: 'No quantity mentioned' };
+  if (textScan.quantity && textScan.assets.length === 1 && mergedAssets.length === 1) {
+    // Single named asset with an explicit "N x …" count.
+    row.quantity = {
+      value: textScan.quantity.value,
+      confidence: textScan.quantity.confidence,
+      source: textScan.quantity.source,
+    };
+  } else if (mergedAssets.length === 1 && mergedAssets[0].quantity != null) {
+    row.quantity = {
+      value: mergedAssets[0].quantity,
+      confidence: 100,
+      source: mergedAssets[0].source,
+    };
+  } else if (
+    textScan.quantity &&
+    textScan.assets.length === 1 &&
+    mergedAssets.some((asset) => asset.assetType === textScan.assets[0].assetType)
+  ) {
+    // "2 x WM" plus extra count-column fixtures — keep the explicit WM count
+    // on the row for preview; per-asset quantities live on detectedAssets.
+    row.quantity = {
+      value: textScan.quantity.value,
+      confidence: textScan.quantity.confidence,
+      source: textScan.quantity.source,
+    };
+  } else if (mergedAssets.length > 1 && countAssets.length === 0 && textScan.quantity) {
+    // Abbreviation lists like "SO, IDWM, W-B" with no count columns.
+    row.quantity = {
+      value: textScan.quantity.value,
+      confidence: textScan.quantity.confidence,
+      source: textScan.quantity.source,
+    };
+  } else {
+    row.quantity = { value: null, confidence: 0, source: 'No quantity mentioned' };
+  }
 }
 
 function buildDuplicateKey(row: WorkingRow): string {
@@ -536,7 +780,11 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
   let currentBuilding: string | undefined;
   let previousRow: WorkingRow | undefined;
   let seenFirstDataLine = false;
+  /** Held across wrapped lines: "1 Lower" waiting for "Ground …", or a lone "1". */
   let pendingBuildingNumber: string | undefined;
+  /** Held when a pure floor keyword ("Ground") is wrapped onto its own line above Building No / Room. */
+  let pendingFloor: string | undefined;
+  let pendingBuildingFromWrap = false;
 
   lines.forEach((cells, index) => {
     const rawLine = normalize(cells.filter(Boolean).join(' '));
@@ -548,6 +796,8 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
       currentBuilding = rawLine;
       previousRow = undefined;
       pendingBuildingNumber = undefined;
+      pendingFloor = undefined;
+      pendingBuildingFromWrap = false;
       return;
     }
 
@@ -555,9 +805,28 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
       return;
     }
 
+    // Column-wrap: a floor keyword alone ("Ground") belongs to the next
+    // Building No / Room lines, not to the previous calorifier row.
+    const pureFloorMatch = rawLine.match(PURE_FLOOR_LINE_PATTERN);
+    if (pureFloorMatch) {
+      pendingFloor = normalizeFloorKeyword(rawLine.replace(/\s+Floor$/i, ''));
+      return;
+    }
+
     const lowerGroundWrap = rawLine.match(LOWER_GROUND_WRAP_PATTERN);
     if (lowerGroundWrap) {
       pendingBuildingNumber = lowerGroundWrap[1];
+      pendingBuildingFromWrap = true;
+      // "1 Lower" is specifically waiting for a Ground half — don't keep a
+      // stale pendingFloor from an earlier wrap.
+      pendingFloor = undefined;
+      return;
+    }
+
+    const loneBuilding = rawLine.match(LONE_BUILDING_NUMBER_PATTERN);
+    if (loneBuilding) {
+      pendingBuildingNumber = loneBuilding[1];
+      pendingBuildingFromWrap = true;
       return;
     }
 
@@ -567,19 +836,45 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
     const tail = match ? match[3] : rawLine;
 
     const resumingLowerGround =
-      Boolean(pendingBuildingNumber) && floorValue?.toLowerCase() === 'ground' && !buildingNumberValue;
+      Boolean(pendingBuildingNumber) &&
+      pendingBuildingFromWrap &&
+      floorValue?.toLowerCase() === 'ground' &&
+      !buildingNumberValue;
     if (resumingLowerGround) {
       buildingNumberValue = pendingBuildingNumber;
       floorValue = 'Lower Ground';
+      pendingBuildingNumber = undefined;
+      pendingBuildingFromWrap = false;
     }
-    pendingBuildingNumber = undefined;
+
+    let usedPendingBuilding = false;
+    let usedPendingFloor = false;
+    if (!buildingNumberValue && pendingBuildingNumber) {
+      buildingNumberValue = pendingBuildingNumber;
+      usedPendingBuilding = true;
+      pendingBuildingNumber = undefined;
+      pendingBuildingFromWrap = false;
+    }
+    if (!floorValue && pendingFloor) {
+      floorValue = pendingFloor;
+      usedPendingFloor = true;
+      pendingFloor = undefined;
+    }
+
+    // A complete register line that already carries Building No + Floor
+    // consumes any leftover wrap state so it cannot leak onto later rooms.
+    if (match && match[1] && match[2]) {
+      pendingBuildingNumber = undefined;
+      pendingFloor = undefined;
+      pendingBuildingFromWrap = false;
+    }
 
     if (!seenFirstDataLine) {
       // A real register always starts with a [Building No] + [Floor] line —
       // anything before that first match is header/glossary preamble
       // (however word-like it may look) and is dropped silently rather than
       // risking a fabricated "location".
-      if (!match) {
+      if (!match && !usedPendingBuilding && !usedPendingFloor) {
         return;
       }
       seenFirstDataLine = true;
@@ -589,7 +884,8 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
     const roomCountsAsStructure = match
       ? isMeaningfulRoom(roomValue)
       : isMeaningfulRoom(roomValue) && looksLikeRoomName(roomValue ?? '');
-    const hasLocationStructure = Boolean(buildingNumberValue) || Boolean(floorValue) || roomCountsAsStructure;
+    const hasLocationStructure =
+      Boolean(buildingNumberValue) || Boolean(floorValue) || roomCountsAsStructure;
 
     if (!hasLocationStructure) {
       // No location info at all on this line — either pure telemetry/noise,
@@ -603,6 +899,17 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
       return;
     }
 
+    const floorFromInference = resumingLowerGround || usedPendingFloor;
+    const buildingFromInference = resumingLowerGround || usedPendingBuilding;
+    const floorSource = resumingLowerGround
+      ? 'Reasonable inference from a wrapped "Lower Ground" line across two physical lines'
+      : usedPendingFloor
+        ? 'Reasonable inference from a wrapped floor keyword on its own line'
+        : 'Extracted from raw text';
+    const buildingSource = buildingFromInference
+      ? 'Reasonable inference from a wrapped Building No / floor across physical lines'
+      : 'Extracted from raw text alongside floor';
+
     const row: WorkingRow = {
       rowNumber: index + 1,
       building: currentBuilding
@@ -611,19 +918,15 @@ export function parsePastedRegister(lines: string[][], address: string): PastePa
       buildingNumber: buildingNumberValue
         ? {
             value: buildingNumberValue,
-            confidence: resumingLowerGround ? 70 : 95,
-            source: resumingLowerGround
-              ? 'Reasonable inference from a wrapped "Lower Ground" line across two physical lines'
-              : 'Extracted from raw text alongside floor',
+            confidence: buildingFromInference ? 70 : 95,
+            source: buildingSource,
           }
         : { value: null, confidence: 0, source: 'No building number found in raw text' },
       floor: floorValue
         ? {
             value: floorValue,
-            confidence: resumingLowerGround ? 70 : 95,
-            source: resumingLowerGround
-              ? 'Reasonable inference from a wrapped "Lower Ground" line across two physical lines'
-              : 'Extracted from raw text',
+            confidence: floorFromInference ? 70 : 95,
+            source: floorSource,
           }
         : { value: null, confidence: 20, source: 'Floor keyword not found in raw text' },
       room: roomValue
@@ -704,16 +1007,26 @@ function buildFinalRow(row: WorkingRow, address: string, isDuplicate: boolean): 
   }
   if (row.assetType.value === null) {
     issues.push({ severity: 'critical', message: 'Asset type could not be confidently classified' });
-  } else if (row.detectedAssets && row.detectedAssets.length > 1) {
-    issues.push({ severity: 'warning', message: 'Multiple assets detected in single row' });
   } else if (row.assetType.confidence >= 100) {
-    // An exact abbreviation/keyword match is reliable enough on its own —
-    // it's surfaced as a transparent note rather than forcing a review.
-    parsingNotes.push('Asset detected from abbreviation');
+    // Exact abbreviation/keyword match or an explicit register count column —
+    // reliable enough on its own; surfaced as a note rather than a review.
+    parsingNotes.push(
+      row.assetType.source.includes('register count column') ||
+        row.detectedAssets?.some((asset) => asset.source.includes('register'))
+        ? 'Asset detected from register count column'
+        : 'Asset detected from abbreviation',
+    );
   } else {
     // A pattern-based inference (not a bare code) is a softer signal and
     // does warrant a quick human sign-off.
     issues.push({ severity: 'warning', message: 'Asset type inferred from text pattern' });
+  }
+  // Multiple fixtures on one register row (Sink + TMV + comments, etc.) is
+  // normal sheet structure — export expands them; do not warn.
+  if (row.detectedAssets && row.detectedAssets.length > 1) {
+    parsingNotes.push(
+      `Multiple assets on row (expanded on export): ${row.detectedAssets.map((asset) => asset.assetType).join(', ')}`,
+    );
   }
   if (row.building.value !== null) {
     // Inheriting the building from the last section heading is the
@@ -744,6 +1057,7 @@ function buildFinalRow(row: WorkingRow, address: string, isDuplicate: boolean): 
     assetType: row.assetType,
     detectedAssets: row.detectedAssets,
     quantity: row.quantity,
+    registerColumns: row.registerColumns,
     rawText: row.rawText,
     importStatus,
     issues,

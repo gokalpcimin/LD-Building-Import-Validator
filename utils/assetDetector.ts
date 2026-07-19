@@ -1,17 +1,5 @@
 import type { AssetType, SheetType } from '../types';
-
-const ASSET_RULES: ReadonlyArray<{ type: AssetType; patterns: RegExp[] }> = [
-  { type: 'Expansion Vessel', patterns: [/\bExpansion\s+Vessel\b/i] },
-  { type: 'Bib Tap', patterns: [/\bBib[\s-]?Tap\b/i, /\bbib\s+tap\b/i] },
-  { type: 'WHB', patterns: [/\bWHB\b/i, /\bWash\s+Hand\s+Basin\b/i, /\bsink\b/i] },
-  { type: 'TMV', patterns: [/\bTMV\b/i] },
-  { type: 'Shower', patterns: [/\bShower\b/i] },
-  { type: 'WC', patterns: [/\bWC\b/i, /\bWater\s+Closet\b/i, /\bToilet\b(?!s)/i] },
-  { type: 'Bib Tap', patterns: [/\btap\b/i, /\boutlet\b/i] },
-];
-
-const VAGUE_ASSET_PATTERN =
-  /\b(?:Toilets|Washroom|Washrooms|Restroom|Restrooms|Bathroom|Bathrooms)\b/i;
+import { classifyAssetFromText } from './services/AssetClassifier';
 
 export function getForcedAssetType(sheetType: SheetType): AssetType | undefined {
   if (sheetType === 'annual-tmv') {
@@ -27,27 +15,38 @@ export interface AssetDetectionResult {
   assetType: AssetType;
   isSpecific: boolean;
   isVague: boolean;
+  /**
+   * True when the type was a soft keyword guess (confidence &lt; 100%).
+   * Callers should attach a warning so the row is Review Required.
+   */
+  inferredFromLocation: boolean;
 }
 
+/**
+ * Shared entry point for non-register sheets. Delegates to the weighted
+ * AssetClassifier so Monthly Outlet and generic sheets do not diverge.
+ */
 export function detectAssetType(
   hints: string[],
   sheetType?: SheetType,
 ): AssetDetectionResult {
   const forced = sheetType ? getForcedAssetType(sheetType) : undefined;
   if (forced) {
-    return { assetType: forced, isSpecific: true, isVague: false };
+    return { assetType: forced, isSpecific: true, isVague: false, inferredFromLocation: false };
   }
 
-  const combined = hints.filter(Boolean).join(' ');
-
-  for (const { type, patterns } of ASSET_RULES) {
-    if (patterns.some((pattern) => pattern.test(combined))) {
-      return { assetType: type, isSpecific: true, isVague: false };
-    }
+  const classification = classifyAssetFromText(hints.filter(Boolean).join(' '));
+  if (classification.assetType === 'Unknown') {
+    return { assetType: 'Unknown', isSpecific: false, isVague: false, inferredFromLocation: false };
   }
 
-  const isVague = VAGUE_ASSET_PATTERN.test(combined);
-  return { assetType: 'Unknown', isSpecific: false, isVague };
+  const isSpecific = classification.confidence >= 1;
+  return {
+    assetType: classification.assetType,
+    isSpecific,
+    isVague: !isSpecific,
+    inferredFromLocation: !isSpecific,
+  };
 }
 
 /**

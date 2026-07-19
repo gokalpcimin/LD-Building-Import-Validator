@@ -3,9 +3,8 @@
 import BuildingAddressPanel from '../components/BuildingAddressPanel';
 import ColumnMappingStep from '../components/ColumnMappingStep';
 import DataPreviewTable from '../components/DataPreviewTable';
-import ExportForReviewButton from '../components/ExportForReviewButton';
+import ExportDownloadButtons from '../components/ExportDownloadButtons';
 import FileUploader from '../components/FileUploader';
-import ImportReadyDownloadButton from '../components/ImportReadyDownloadButton';
 import PastedRegisterReview from '../components/PastedRegisterReview';
 import SheetPanel from '../components/SheetPanel';
 import ValidationReport from '../components/ValidationReport';
@@ -13,12 +12,12 @@ import type { ColumnRole, SheetColumnMapping, SheetData, WorkbookResult } from '
 import { buildDefaultWorkbookMapping } from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
 import { parsePastedRegister } from '../utils/pasteRegisterParser';
-import { buildImportReadyRows } from '../utils/importReadyExport';
+import { buildExportRows } from '../utils/importReadyExport';
 import { mergeAssetSheets, processWorkbook } from '../utils/processWorkbook';
-import { getSheetStatusLabel } from '../utils/validationEngine';
+import { getSheetStatusLabel, groupRowsByImportStatus } from '../utils/validationEngine';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type WorkflowStep = 'upload' | 'mapping' | 'workspace' | 'final' | 'pasteReview';
 
@@ -44,10 +43,10 @@ export default function HomePage() {
   const [workbook, setWorkbook] = useState<WorkbookResult | null>(null);
   const [activeSheetName, setActiveSheetName] = useState('');
   const [fileName, setFileName] = useState<string | undefined>();
-  /** Untouched bytes of the uploaded .xlsx (undefined for CSV/.xls/paste) — lets Export for Review edit the real file so all original formatting survives. */
-  const [originalFile, setOriginalFile] = useState<ArrayBuffer | undefined>();
   const [needsManualAddress, setNeedsManualAddress] = useState(false);
   const [pasteAddress, setPasteAddress] = useState('');
+  /** Excel Import Ready: Review Required rows the user manually approved. */
+  const [promotedExcelRowIdxs, setPromotedExcelRowIdxs] = useState<Set<number>>(() => new Set());
 
   const activeSheet = useMemo(
     () => workbook?.sheets.find((sheet) => sheet.name === activeSheetName) ?? null,
@@ -61,12 +60,64 @@ export default function HomePage() {
     return mergeAssetSheets(workbook);
   }, [workbook]);
 
-  const importReadyRows = useMemo(() => {
+  useEffect(() => {
+    setPromotedExcelRowIdxs(new Set());
+  }, [finalData]);
+
+  const effectiveFinalErrors = useMemo(() => {
     if (!finalData) {
       return [];
     }
-    return buildImportReadyRows(finalData.rows, finalData.errors);
-  }, [finalData]);
+    return finalData.errors.filter(
+      (error) => !(promotedExcelRowIdxs.has(error.rowIdx) && error.severity === 'warning'),
+    );
+  }, [finalData, promotedExcelRowIdxs]);
+
+  const finalKpiSummary = useMemo(() => {
+    if (!finalData) {
+      return null;
+    }
+    const { reviewRows, blockedRows } = groupRowsByImportStatus(
+      finalData.rows,
+      effectiveFinalErrors,
+    );
+    return {
+      totalImported: finalData.summary.totalImported,
+      distinctLocationsCount: finalData.summary.distinctLocationsCount,
+      totalErrors: blockedRows.length,
+      totalWarnings: reviewRows.length,
+    };
+  }, [finalData, effectiveFinalErrors]);
+
+  const readyExportRows = useMemo(() => {
+    if (!finalData) {
+      return [];
+    }
+    return buildExportRows(finalData.rows, effectiveFinalErrors, 'ready');
+  }, [finalData, effectiveFinalErrors]);
+
+  const reviewExportRows = useMemo(() => {
+    if (!finalData) {
+      return [];
+    }
+    return buildExportRows(finalData.rows, effectiveFinalErrors, 'review');
+  }, [finalData, effectiveFinalErrors]);
+
+  const promoteExcelRow = useCallback((rowIdx: number) => {
+    setPromotedExcelRowIdxs((prev) => {
+      const next = new Set(prev);
+      next.add(rowIdx);
+      return next;
+    });
+  }, []);
+
+  const demoteExcelRow = useCallback((rowIdx: number) => {
+    setPromotedExcelRowIdxs((prev) => {
+      const next = new Set(prev);
+      next.delete(rowIdx);
+      return next;
+    });
+  }, []);
 
   // Pasted building-register text is semi-structured free text, not a
   // column grid — it gets its own dedicated parsing engine and review
@@ -78,24 +129,20 @@ export default function HomePage() {
     return parsePastedRegister(rawSheets[0].data, pasteAddress);
   }, [rawSheets, pasteAddress]);
 
-  const handleDataLoaded = useCallback(
-    (sheets: SheetData[], loadedFileName?: string, loadedOriginalFile?: ArrayBuffer) => {
-      setRawSheets(sheets);
-      setFileName(loadedFileName);
-      setOriginalFile(loadedOriginalFile);
-      setWorkbook(null);
+  const handleDataLoaded = useCallback((sheets: SheetData[], loadedFileName?: string) => {
+    setRawSheets(sheets);
+    setFileName(loadedFileName);
+    setWorkbook(null);
 
-      if (isPasteSourced(sheets)) {
-        setPasteAddress('');
-        setStep('pasteReview');
-        return;
-      }
+    if (isPasteSourced(sheets)) {
+      setPasteAddress('');
+      setStep('pasteReview');
+      return;
+    }
 
-      setColumnMappings(buildDefaultWorkbookMapping(sheets));
-      setStep('mapping');
-    },
-    [],
-  );
+    setColumnMappings(buildDefaultWorkbookMapping(sheets));
+    setStep('mapping');
+  }, []);
 
   const handleMappingRoleChange = useCallback(
     (sheetName: string, header: string, role: ColumnRole) => {
@@ -106,6 +153,10 @@ export default function HomePage() {
     },
     [],
   );
+
+  const handleResetMappings = useCallback(() => {
+    setColumnMappings(buildDefaultWorkbookMapping(rawSheets));
+  }, [rawSheets]);
 
   const handleMappingConfirm = useCallback(() => {
     const result = processWorkbook(rawSheets, { fileName, columnMappings });
@@ -150,7 +201,6 @@ export default function HomePage() {
     setWorkbook(null);
     setActiveSheetName('');
     setFileName(undefined);
-    setOriginalFile(undefined);
     setNeedsManualAddress(false);
     setPasteAddress('');
   }, []);
@@ -179,7 +229,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-[96rem] items-center justify-between px-4 py-4 sm:px-6">
           <div className="flex items-center gap-4">
             <div className="relative h-12 w-28">
               <Image
@@ -224,7 +274,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="mx-auto max-w-[96rem] px-4 py-8 sm:px-6">
         {step !== 'pasteReview' && (
           <div className="mb-8 flex flex-wrap items-center gap-3">
             {WORKFLOW_STEPS.map((workflowStep, index) => {
@@ -291,6 +341,7 @@ export default function HomePage() {
             sheets={rawSheets}
             mappings={columnMappings}
             onRoleChange={handleMappingRoleChange}
+            onResetToSuggested={handleResetMappings}
             onConfirm={handleMappingConfirm}
           />
         )}
@@ -392,15 +443,11 @@ export default function HomePage() {
                       : `Parsed ${finalData.rows.length} asset rows. Review the summary and preview below.`}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-start justify-end gap-3">
-                  <ImportReadyDownloadButton rows={importReadyRows} fileName={fileName} />
-                  <ExportForReviewButton
-                    rawSheets={rawSheets}
-                    workbook={workbook}
-                    fileName={fileName}
-                    originalFile={originalFile}
-                  />
-                </div>
+                <ExportDownloadButtons
+                  readyRows={readyExportRows}
+                  reviewRows={reviewExportRows}
+                  fileName={fileName}
+                />
               </div>
             </div>
 
@@ -421,12 +468,15 @@ export default function HomePage() {
               </div>
             </div>
 
-            <ValidationReport summary={finalData.summary} />
+            <ValidationReport summary={finalKpiSummary ?? finalData.summary} />
             <DataPreviewTable
               rows={finalData.rows}
               errors={finalData.errors}
               showSheetColumn={false}
               showRowColumn={false}
+              promotedRowIdxs={promotedExcelRowIdxs}
+              onPromoteRow={promoteExcelRow}
+              onDemoteRow={demoteExcelRow}
             />
           </div>
         )}

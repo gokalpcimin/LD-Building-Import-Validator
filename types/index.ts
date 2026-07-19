@@ -2,6 +2,7 @@ export type AssetType =
   | 'Bib Tap'
   | 'WC'
   | 'Shower'
+  | 'Kitchen Outlet'
   | 'Expansion Vessel'
   | 'TMV'
   | 'WHB'
@@ -94,6 +95,12 @@ export interface ImportReadyRow {
   sheetName?: string;
   /** 1-based row number in the original uploaded file, for locating/fixing the source row. */
   sourceRowNumber?: number;
+  /** 0–1 classification confidence from the weighted keyword engine (Monthly Outlet). */
+  assetConfidence?: number;
+  /** Keywords that drove the asset classification (for review UI). */
+  assetMatchedKeywords?: string[];
+  /** Soft classification or unknown — surface in Review Required. */
+  assetNeedsReview?: boolean;
 }
 
 export interface ValidationError {

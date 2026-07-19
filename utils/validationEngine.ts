@@ -54,11 +54,20 @@ export function validateRow(
       sheetName,
     });
   } else if (row.assetType === 'Unknown') {
+    // Soft unknown — human should classify; do not hard-block the row.
     errors.push({
       rowIdx,
       field: 'assetType',
-      severity: 'error',
-      message: 'Asset type could not be confidently classified',
+      severity: 'warning',
+      message: 'Unknown asset type — please classify before import',
+      sheetName,
+    });
+  } else if (row.assetNeedsReview) {
+    errors.push({
+      rowIdx,
+      field: 'assetType',
+      severity: 'warning',
+      message: `Asset type "${row.assetType}" needs review (confidence ${Math.round((row.assetConfidence ?? 0) * 100)}%)`,
       sheetName,
     });
   }

@@ -5,6 +5,7 @@ const FLOOR_PATTERNS: ReadonlyArray<{
   normalize: (match: RegExpMatchArray) => string;
 }> = [
   { pattern: /\bGround\s+Floor\b/i, normalize: () => 'Ground Floor' },
+  { pattern: /\bGF\b/, normalize: () => 'Ground Floor' },
   { pattern: /\b(?:First|1st)\s+Floor\b/i, normalize: () => '1st Floor' },
   { pattern: /\b(?:Second|2nd)\s+Floor\b/i, normalize: () => '2nd Floor' },
   { pattern: /\b(?:Third|3rd)\s+Floor\b/i, normalize: () => '3rd Floor' },

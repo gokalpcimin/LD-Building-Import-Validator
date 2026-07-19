@@ -1,0 +1,121 @@
+Outlet & Temperature Register
+Other Services i.e.
+Building No
+Floor
+Location/Barcode
+Sentinel Hot
+Sentinel Cold
+Sentinel Asset
+Type
+Biocide Reading
+Hot Temp OC
+Hot Source
+Cold Temp OC
+Cold Source
+Sink
+Whb
+Shower
+TMVs No.
+Scale on outlet
+Spray Outlets
+Dead Legs
+Flexible Hoses
+Vending, washing machines,
+dishwashers, chiller units, tea
+boilers etc., /
+Other Comments
+Abbreviations: Dishwasher – DW, Washing Machine – WM, Bib Tap - BT, Hot Drinks Machine – HDM, Ice Machine – IM, Chilled Water Fountain – CWF, Water Fountain - WF
+Emergency Shower – ES, Emergency Eyewash – EEW, Water Boiler - WB
+Begin the walk through at the Ground Floor Laundry – exit and walk left towards reception. Stay left.
+1 Lower
+Ground Domestic Hot Water Plant Room - - - - 1 - - - - - - - - 2 x Newark Calorifiers
+Ground
+1
+Staff Laundry -
+52.1
+34.4 2 7.3 1 2 - - 1 - - - -
+DHWS appeared to be accurate
+against the flow measurement, 2 x
+WM
+1 Ground Residential Laundry - 39.1 2 8.1 1 1 - - - - - - - WM
+1 Ground The Orchards Lounge - 39.2 2 - 1 - 1 - 1 - - - -
+1 Ground Orchards WC-1 - 39.0 2 - 1 - 1 - 1 - - - - WC
+1 Ground Orchards Ass Bathroom - 41.1 2 10.9 1 - 1 1 2 - - - - Bath+SH head, WC
+1 Ground Orchards WC-2 - 40.7 2 - 1 - 1 - 1 - - - - WC
+1 Ground Corridor junction - - - - 1 - - - - - - - - Chilled Cold Water Dispenser
+1 Ground Flat 3 - 2 1 1 1 1 2 - - - - WC
+1 Ground Flat 5 - 2 1 1 1 1 2 - - - - WC
+1 Ground Flat 7 - 43.1 2 7.9 1 1 1 1 2 - - - - WC
+1 Ground (Former) Cleaner store Y Y N
+N - 58.4 2 13.7 1 1 - - - - - - -
+Appears totally redundant but a
+preferred sentinel to Flat 7
+1 Ground Flat 8 - 2 1 1 1 1 2 - - - - WC
+1 Ground Flat 6 - 38.8 2 - 1 1 1 1 2 - - - - WC
+1 Ground Flat 4 - 2 1 1 1 1 2 - - - - WC
+1 Ground Flat 2 - 2 1 1 1 1 2 - - - - WC
+1 Ground Flat 1 - 2 1 1 1 1 2 - - - - WC
+1 Ground Medical Room - 45.5 2 16.7 1 1 - - 1 - - - -
+1 Ground Hair Dresser - 43.5 2 16.1 1 - 2 - 2 - - - - 1 x Spray head
+1 Ground Main Office Staff WC - 40.3 2 - 1 - 1 - 1 - - - - WC
+1 Ground Rear of Main office WC - WC - 38.8 2 - 1 - 1 - 1 - - - - WC
+CROFTERS
+1 Ground Restaurant Servery - 44.1 2 - 1 - 1 - 1 - - - -
+1 Ground Restaurant Kitchen Y Y F
+F - 57.2 2 16.4 1 2 1 - 1 - - - - SO, IDWM, W-B
+1 Ground Kitchen WC - 40.8 2 - 1 - 1 - 1 - - - -
+WC, Supply assumed to move into
+courtyard for Bib Tap x 1
+1 Ground Corridor WC - 42.9 2 - 1 - 1 - 1 - - - - WC
+Bracken Close
+1 Ground Lounge - 34.6 2 17.0 1 - 1 - 1 - - - - Poor flow from hot via TMV
+1 Ground WC - 36.9 2 - 1 - 1 - 1 - - - - WC
+1 Ground Bathroom - 44.2 2 - 1 - 1 1 1 - - - - Bath+SH, WC
+1 Ground Sluice room Y Y F
+F -
+44.3
+57.6 2 18.9 1 1 1 - 1 - - - - 1 x Panamatic
+1 Ground Room 4 - 41.3 2 17.6 1 - 1 1 1 - - - - WC
+1 Ground Rooms 1-3, 5-10 - - 2 - 1 - 9 9 9 - - - - WC X 9
+1 Ground Room 7 - 43.1 2 - 1
+1 Ground Room 8 - 44.0 2 - 1
+Heather Court
+1 Ground WC - 43.2 2 - 1 - 1 - 1 - - - - WC
+1 Ground Bathroom - 41.2 2 - 1 - 1 1 1 - - - - Bath+SH, WC
+1 Ground Lounge - 45.1 2 - 1 - 1 - 1 - - - -
+1 Ground Rooms 11-20 - - 2 - 1 - 10 10 10 - - - - 10 x WC
+1 Ground Room 14 - 38.6 2 16.1 1
+1 Ground Room 19 - 43.3 2 16.2 1
+Bromford
+1 Ground Flats 17-18-19-20 - - 2 - 1 4 4 4 8 - - - - 4 x WC
+First Floor
+1 First Bathroom (Above the GF Laundry) - 34.4 2 - 1 - 1 1 1 - - - - Bath+SH, WC
+1 First Lounge - 36.9 2 - 1 - 1 - 1 - - - -
+1 First Flats 9-16 - - 2 - 1 8 8 8 16 - - - - 8 X WC
+1 First WC-1 - 37.4 2 - 1 - 1 - 1 - - - - WC
+1 First WC-2 - 40.7 2 - 1 - 1 - 1 - - - - WC
+1 First Guest Suite -
+40.1
+38.2 2 16.9 1 1 1 1 2 - - - - Little Used, WC
+1 First Redundant Bedroom (storage) Y Y F
+F - 37.9 2 - 1 - 1 1 1 - - - - WC
+1 First Staff Office - 42.7 2 17.1 1 1 - - 1 - - - -
+1 First 2nd Redundant Bedroom - 42.9 2 - 1 - 1 1 1 - - - - WC
+Brambles
+1 First Lounge - 44.1 2 15.3 1 - 1 - 1 - - - -
+1 First WC-1 - 33.7 2 - 1 - 1 - 1 - - - - WC, Poor Hot
+1 First WC-2 - 26.8 2 - 1 - 1 - 1 - - - - WC, Poor Hot
+1 First Bathroom - 32.9 2 - 1 - 1 1 2 - - - - Bath+SH, WC, Poor hot
+1 First Cleaner store Y Y F
+F -
+49.0
+34.0 2 16.9 1 1 1 - 1 - - - - Panomatic
+1 First Rooms 21-30 - - 2 - 1 - 10 10 10 - - - - 10 x WC
+1 First Room 27 - 19.2 2 - 1
+1 First Room 29 - 38.3 2 - 1
+Ferndale
+1 First WC - 41.2 2 - 1 - 1 - 1 - - - - WC
+1 First Bathroom - 40.7 2 - 1 - 1 1 2 - - - - Bath+SH, WC
+1 First Lounge - 43.7 2 - 1 - 1 - 1 - - - -
+1 First Rooms 31-40 - - 2 - 1 - 10 10 10 - - - - 10 x WC
+1 First Flats 21-24 - - 2 - 1 4 4 4 8 - - - - 4 x WC

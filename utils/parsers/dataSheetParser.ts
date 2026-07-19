@@ -326,8 +326,17 @@ export function parseDataSheet(
     }
 
     const assetHints = [locationText, assetText, room];
-    const { assetType } = detectAssetType(assetHints, context.sheetType);
-    pushRow({ ...baseRow, assetType }, rawRowText, notes);
+    const detection = detectAssetType(assetHints, context.sheetType);
+    pushRow(
+      {
+        ...baseRow,
+        assetType: detection.assetType,
+        assetNeedsReview: detection.inferredFromLocation || detection.assetType === 'Unknown',
+        assetConfidence: detection.isSpecific ? 1 : detection.assetType === 'Unknown' ? 0 : 0.5,
+      },
+      rawRowText,
+      notes,
+    );
   });
 
   if (duplicateCategory !== 'none') {

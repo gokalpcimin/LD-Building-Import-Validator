@@ -11,8 +11,7 @@ import { useCallback, useRef, useState } from 'react';
 type IngestMode = 'upload' | 'paste';
 
 export interface FileUploaderProps {
-  /** `originalFile` is the untouched uploaded .xlsx bytes (undefined for CSV/.xls/paste) — kept so Export for Review can edit the real file instead of rebuilding it. */
-  onDataLoaded: (sheets: SheetData[], fileName?: string, originalFile?: ArrayBuffer) => void;
+  onDataLoaded: (sheets: SheetData[], fileName?: string) => void;
 }
 
 function parseCsvFile(file: File): Promise<SheetData[]> {
@@ -40,21 +39,15 @@ function parseSheetRows(sheet: XLSX.WorkSheet): string[][] {
   return rows.map((row) => row.map((cell) => (cell ?? '').toString().trim()));
 }
 
-async function parseExcelFile(
-  file: File,
-): Promise<{ sheets: SheetData[]; originalFile?: ArrayBuffer }> {
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+function parseExcelFile(file: File): Promise<SheetData[]> {
+  return file.arrayBuffer().then((arrayBuffer) => {
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-  const sheets = workbook.SheetNames.map((sheetName) => ({
-    name: sheetName,
-    data: parseSheetRows(workbook.Sheets[sheetName]),
-  })).filter((sheet) => sheet.data.some((row) => row.some((cell) => cell.length > 0)));
-
-  // Only modern .xlsx can be round-tripped with formatting intact; legacy
-  // .xls falls back to the rebuild-from-values export path.
-  const isXlsx = file.name.toLowerCase().endsWith('.xlsx');
-  return { sheets, originalFile: isXlsx ? arrayBuffer : undefined };
+    return workbook.SheetNames.map((sheetName) => ({
+      name: sheetName,
+      data: parseSheetRows(workbook.Sheets[sheetName]),
+    })).filter((sheet) => sheet.data.some((row) => row.some((cell) => cell.length > 0)));
+  });
 }
 
 export default function FileUploader({ onDataLoaded }: FileUploaderProps) {
@@ -64,19 +57,17 @@ export default function FileUploader({ onDataLoaded }: FileUploaderProps) {
   const [error, setError] = useState<string | null>(null);
   const [pendingSheets, setPendingSheets] = useState<SheetData[] | null>(null);
   const [pendingFileName, setPendingFileName] = useState<string | undefined>();
-  const [pendingOriginalFile, setPendingOriginalFile] = useState<ArrayBuffer | undefined>();
   const [selectedSheetNames, setSelectedSheetNames] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetPendingSelection = useCallback(() => {
     setPendingSheets(null);
     setPendingFileName(undefined);
-    setPendingOriginalFile(undefined);
     setSelectedSheetNames(new Set());
   }, []);
 
   const handleData = useCallback(
-    (sheets: SheetData[], fileName?: string, originalFile?: ArrayBuffer) => {
+    (sheets: SheetData[], fileName?: string) => {
       const hasContent = sheets.some((sheet) =>
         sheet.data.some((row) => row.some((cell) => cell.length > 0)),
       );
@@ -88,7 +79,7 @@ export default function FileUploader({ onDataLoaded }: FileUploaderProps) {
 
       setError(null);
       resetPendingSelection();
-      onDataLoaded(sheets, fileName, originalFile);
+      onDataLoaded(sheets, fileName);
     },
     [onDataLoaded, resetPendingSelection],
   );
@@ -109,17 +100,14 @@ export default function FileUploader({ onDataLoaded }: FileUploaderProps) {
       resetPendingSelection();
 
       try {
-        const { sheets, originalFile } = isExcel
-          ? await parseExcelFile(file)
-          : { sheets: await parseCsvFile(file), originalFile: undefined };
+        const sheets = isExcel ? await parseExcelFile(file) : await parseCsvFile(file);
 
         if (sheets.length > 1) {
           setPendingSheets(sheets);
           setPendingFileName(file.name);
-          setPendingOriginalFile(originalFile);
           setSelectedSheetNames(new Set(sheets.map((sheet) => sheet.name)));
         } else {
-          handleData(sheets, file.name, originalFile);
+          handleData(sheets, file.name);
         }
       } catch (err) {
         console.error('File parsing error:', err);
@@ -165,8 +153,8 @@ export default function FileUploader({ onDataLoaded }: FileUploaderProps) {
       return;
     }
 
-    handleData(selected, pendingFileName, pendingOriginalFile);
-  }, [handleData, pendingFileName, pendingOriginalFile, pendingSheets, selectedSheetNames]);
+    handleData(selected, pendingFileName);
+  }, [handleData, pendingFileName, pendingSheets, selectedSheetNames]);
 
   const showSheetSelector = pendingSheets !== null && pendingSheets.length > 1;
 

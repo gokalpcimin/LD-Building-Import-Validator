@@ -120,15 +120,25 @@ function isSectionDividerRow(row: string[]): boolean {
   return false;
 }
 
-/** Extracts "Unit 3" from a section-divider row like ["Unit 3", "", "", ...]. */
+/**
+ * Extracts unit from a section-divider row like ["Unit 3", "", ...] or
+ * ["Unit 10- The Christy Estate", "", ...] — these sit above outlet rows and
+ * are not repeated inside Outlet/Location cells.
+ */
 export function extractUnitDividerValue(row: string[]): string | null {
   const cells = row.map(normalizeCell).filter(Boolean);
   if (cells.length !== 1) {
     return null;
   }
 
-  const match = cells[0].match(/^unit\s+([\w\d/]+)$/i);
-  return match ? `Unit ${match[1]}` : null;
+  const match = cells[0].match(/^unit\s+([\w\d/]+)(?:\s*[-–]\s*(.+))?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const id = match[1];
+  const suffix = match[2]?.trim();
+  return suffix ? `Unit ${id}- ${suffix}` : `Unit ${id}`;
 }
 
 /**

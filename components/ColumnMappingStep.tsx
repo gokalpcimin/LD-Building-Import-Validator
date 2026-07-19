@@ -3,15 +3,22 @@
 import type { ColumnRole, SheetColumnMapping, SheetData } from '../types';
 import type { AiMappingSuggestion } from '../utils/aiMappingSuggester';
 import { suggestMappingWithAi } from '../utils/aiMappingSuggester';
-import { COLUMN_ROLE_LABELS, COLUMN_ROLE_OPTIONS, extractSheetHeaderInfo } from '../utils/columnMapping';
+import {
+  buildDefaultWorkbookMapping,
+  COLUMN_ROLE_LABELS,
+  COLUMN_ROLE_OPTIONS,
+  extractSheetHeaderInfo,
+} from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
-import { ArrowRight, Check, Loader2, Sparkles, Wand2, X } from 'lucide-react';
+import { ArrowRight, Check, Loader2, RotateCcw, Sparkles, Wand2, X } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
 export interface ColumnMappingStepProps {
   sheets: SheetData[];
   mappings: Record<string, SheetColumnMapping>;
   onRoleChange: (sheetName: string, header: string, role: ColumnRole) => void;
+  /** Restores the automatic keyword-based mapping after the user has made manual changes. */
+  onResetToSuggested: () => void;
   onConfirm: () => void;
 }
 
@@ -35,6 +42,7 @@ export default function ColumnMappingStep({
   sheets,
   mappings,
   onRoleChange,
+  onResetToSuggested,
   onConfirm,
 }: ColumnMappingStepProps) {
   const [aiState, setAiState] = useState<AiState>({ status: 'idle' });
@@ -45,6 +53,17 @@ export default function ColumnMappingStep({
   );
 
   const mappableSheets = sheetInfos.filter((info) => info.sheetType !== 'cover-page');
+
+  const suggestedMappings = useMemo(() => buildDefaultWorkbookMapping(sheets), [sheets]);
+
+  const isModifiedFromSuggested = useMemo(() => {
+    return JSON.stringify(mappings) !== JSON.stringify(suggestedMappings);
+  }, [mappings, suggestedMappings]);
+
+  const handleResetToSuggested = useCallback(() => {
+    onResetToSuggested();
+    setAiState({ status: 'idle' });
+  }, [onResetToSuggested]);
 
   const handleAiSuggest = useCallback(async () => {
     setAiState({ status: 'loading' });
@@ -119,20 +138,32 @@ export default function ColumnMappingStep({
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
-            <button
-              type="button"
-              onClick={handleAiSuggest}
-              disabled={aiState.status === 'loading' || mappableSheets.length === 0}
-              title="Asks the AI assistant to propose roles for columns the automatic matcher left unmapped. Suggestions are never applied without your approval."
-              className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {aiState.status === 'loading' ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Wand2 className="h-4 w-4" />
-              )}
-              {aiState.status === 'loading' ? 'Analyzing columns…' : 'Suggest with AI'}
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleResetToSuggested}
+                disabled={!isModifiedFromSuggested}
+                title="Restore the automatic keyword-based mapping for every column, discarding your manual changes."
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reset to Suggested
+              </button>
+              <button
+                type="button"
+                onClick={handleAiSuggest}
+                disabled={aiState.status === 'loading' || mappableSheets.length === 0}
+                title="Asks the AI assistant to propose roles for columns the automatic matcher left unmapped. Suggestions are never applied without your approval."
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {aiState.status === 'loading' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="h-4 w-4" />
+                )}
+                {aiState.status === 'loading' ? 'Analyzing columns…' : 'Suggest with AI'}
+              </button>
+            </div>
             {aiState.status === 'done' && totalSuggestions === 0 && (
               <p className="text-xs text-slate-500">
                 No additional suggestions — unmapped columns don&apos;t resemble any platform field.
@@ -224,10 +255,13 @@ export default function ColumnMappingStep({
                 </tr>
               </thead>
               <tbody>
-                {columns.map(({ header, sample }) => {
+                {columns.map(({ header, sample }, columnIndex) => {
                   const role = mapping[header] ?? 'ignore';
                   return (
-                    <tr key={header} className="border-b border-slate-50 last:border-b-0">
+                    <tr
+                      key={`${info.sheetName}-${columnIndex}-${header}`}
+                      className="border-b border-slate-50 last:border-b-0"
+                    >
                       <td className="px-6 py-2.5 font-medium text-slate-800">{header}</td>
                       <td className="max-w-[220px] truncate px-6 py-2.5 text-slate-500">
                         {sample || '—'}
