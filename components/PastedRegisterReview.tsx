@@ -4,6 +4,7 @@ import BuildingAddressPanel from './BuildingAddressPanel';
 import ExportDownloadButtons from './ExportDownloadButtons';
 import ValidationReport from './ValidationReport';
 import { buildExportRowsFromPaste } from '../utils/importReadyExport';
+import { buildPasteSummaryReport } from '../utils/importSummaryReport';
 import type { FieldConfidence, PastedAssetRow, PasteParseSummary } from '../utils/pasteRegisterParser';
 import {
   AlertTriangle,
@@ -125,6 +126,16 @@ export default function PastedRegisterReview({
     [effectiveRows],
   );
 
+  const summaryReport = useMemo(
+    () =>
+      buildPasteSummaryReport({
+        address,
+        rows: effectiveRows,
+        distinctLocations: summary.distinctLocations,
+      }),
+    [address, effectiveRows, summary.distinctLocations],
+  );
+
   const kpiSummary = {
     totalImported: summary.totalRows,
     distinctLocationsCount: summary.distinctLocations,
@@ -189,6 +200,7 @@ export default function PastedRegisterReview({
             readyRows={readyExportRows}
             reviewRows={reviewExportRows}
             fileName="pasted-data"
+            summaryReport={summaryReport}
           />
         </div>
 

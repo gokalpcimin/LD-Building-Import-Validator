@@ -87,3 +87,33 @@ export function keywordsForAssetType(assetType: AssetType): string[] {
   );
   return [...unique].sort((a, b) => b.length - a.length);
 }
+
+/**
+ * Soft / place-like words that also signal an asset type (e.g. "toilets" → WC,
+ * "kitchen" → Kitchen Outlet). They describe the room itself, so they must
+ * stay in the room field — only true fixture names (bib tap, WHB, sink…) are stripped.
+ */
+const PLACE_NAME_ASSET_KEYWORDS = new Set([
+  'toilet',
+  'toilets',
+  'restroom',
+  'restrooms',
+  'washroom',
+  'washrooms',
+  'tuvalet',
+  'bathroom',
+  'bathrooms',
+  'en-suite',
+  'ensuite',
+  'kitchen',
+  'kitchenette',
+]);
+
+export function isPlaceNameAssetKeyword(keyword: string): boolean {
+  return PLACE_NAME_ASSET_KEYWORDS.has(keyword.toLowerCase().trim());
+}
+
+/** Fixture keywords safe to remove from room text for a classified asset. */
+export function fixtureKeywordsForRoomStripping(assetType: AssetType): string[] {
+  return keywordsForAssetType(assetType).filter((keyword) => !isPlaceNameAssetKeyword(keyword));
+}

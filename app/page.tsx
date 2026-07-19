@@ -13,6 +13,7 @@ import { buildDefaultWorkbookMapping } from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
 import { parsePastedRegister } from '../utils/pasteRegisterParser';
 import { buildExportRows } from '../utils/importReadyExport';
+import { buildWorkbookSummaryReport } from '../utils/importSummaryReport';
 import { mergeAssetSheets, processWorkbook } from '../utils/processWorkbook';
 import { getSheetStatusLabel, groupRowsByImportStatus } from '../utils/validationEngine';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
@@ -102,6 +103,21 @@ export default function HomePage() {
     }
     return buildExportRows(finalData.rows, effectiveFinalErrors, 'review');
   }, [finalData, effectiveFinalErrors]);
+
+  const summaryReport = useMemo(() => {
+    if (!finalData || !workbook) {
+      return null;
+    }
+    return buildWorkbookSummaryReport({
+      fileName,
+      buildingAddress: workbook.buildingAddress,
+      rows: finalData.rows,
+      errors: effectiveFinalErrors,
+      sheets: workbook.sheets,
+      distinctLocations:
+        finalKpiSummary?.distinctLocationsCount ?? finalData.summary.distinctLocationsCount,
+    });
+  }, [finalData, workbook, fileName, effectiveFinalErrors, finalKpiSummary]);
 
   const promoteExcelRow = useCallback((rowIdx: number) => {
     setPromotedExcelRowIdxs((prev) => {
@@ -447,6 +463,7 @@ export default function HomePage() {
                   readyRows={readyExportRows}
                   reviewRows={reviewExportRows}
                   fileName={fileName}
+                  summaryReport={summaryReport}
                 />
               </div>
             </div>
@@ -471,7 +488,7 @@ export default function HomePage() {
             <ValidationReport summary={finalKpiSummary ?? finalData.summary} />
             <DataPreviewTable
               rows={finalData.rows}
-              errors={finalData.errors}
+              errors={effectiveFinalErrors}
               showSheetColumn={false}
               showRowColumn={false}
               promotedRowIdxs={promotedExcelRowIdxs}

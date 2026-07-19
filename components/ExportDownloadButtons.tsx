@@ -2,26 +2,28 @@
 
 import type { ImportReadyExportRow } from '../utils/importReadyExport';
 import { downloadImportReadyCsv } from '../utils/importReadyExport';
-import { AlertTriangle, FileDown } from 'lucide-react';
+import type { ImportSummaryReportInput } from '../utils/importSummaryReport';
+import { viewImportSummaryReport } from '../utils/importSummaryReport';
+import { AlertTriangle, Eye, FileDown } from 'lucide-react';
 import { useCallback } from 'react';
 
 export interface ExportDownloadButtonsProps {
   readyRows: ImportReadyExportRow[];
   reviewRows: ImportReadyExportRow[];
   fileName?: string;
+  /** When set, enables View Summary Report (HTML with charts in a new tab). */
+  summaryReport?: ImportSummaryReportInput | null;
 }
 
 /**
- * Two CSV downloads with the same columns (Address, Asset Type, Floor, Room,
- * Unit), split by import status:
- * - Import-Ready → only READY rows (platform ingest)
- * - Needs Review → only REVIEW_REQUIRED rows (human queue)
- * Blocked rows are in neither file.
+ * CSV downloads (Ready / Needs Review) plus optional View Summary Report.
+ * Saving the HTML report is offered inside the opened summary page.
  */
 export default function ExportDownloadButtons({
   readyRows,
   reviewRows,
   fileName,
+  summaryReport,
 }: ExportDownloadButtonsProps) {
   const baseName = fileName ? fileName.replace(/\.[^./]+$/, '') : 'building-import';
 
@@ -33,8 +35,26 @@ export default function ExportDownloadButtons({
     downloadImportReadyCsv(`${baseName}-needs-review.csv`, reviewRows);
   }, [baseName, reviewRows]);
 
+  const handleSummaryView = useCallback(() => {
+    if (!summaryReport) {
+      return;
+    }
+    viewImportSummaryReport(summaryReport);
+  }, [summaryReport]);
+
   return (
     <div className="flex flex-wrap items-start justify-end gap-2">
+      {summaryReport && (
+        <button
+          type="button"
+          onClick={handleSummaryView}
+          title="Opens a colorful HTML report with charts. You can download it from inside that page."
+          className="inline-flex items-center gap-2 rounded-lg border border-teal-300 bg-teal-50 px-5 py-2.5 text-sm font-medium text-teal-900 transition hover:bg-teal-100"
+        >
+          <Eye className="h-4 w-4" />
+          View Summary Report
+        </button>
+      )}
       <button
         type="button"
         onClick={handleReadyDownload}

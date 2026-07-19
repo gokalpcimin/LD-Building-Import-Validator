@@ -2,7 +2,10 @@ import type { ImportReadyRow, ValidationError } from '../../types';
 import { findHeaderByRole } from '../columnMapping';
 import { normalizeSheetData } from '../headerDetection';
 import { classifyAssetFromText } from '../services/AssetClassifier';
-import { parseOutletLocation } from '../services/LocationParser';
+import {
+  parseOutletLocation,
+  resolveMonthlyOutletUnit,
+} from '../services/LocationParser';
 import { validateRow } from '../validationEngine';
 import { getColumnValue, getLocationColumn } from './columnDetection';
 import type { ParserContext, ParserResult } from './types';
@@ -68,10 +71,14 @@ export function parseMonthlyOutlet(
     );
 
     const floor = explicitFloor || location.floor || undefined;
-    // Section headings (grey "Unit 14/15" rows) are the Excel source of truth.
-    // Inline "unit 14" / "Unit 15- …" inside Outlet/Location is local detail and
-    // must not override the section unit (e.g. replace "Unit 14/15" with "Unit 14").
-    const unit = explicitUnit || inheritedUnit || location.unit || undefined;
+    // Combined section headings (e.g. "Unit 14/15") are narrowed from Outlet/Location
+    // when the row names unit 14 or unit 15; plain sections ("Unit 3") are inherited.
+    const unitResolution = resolveMonthlyOutletUnit(
+      inheritedUnit,
+      outletText,
+      location.unit || undefined,
+    );
+    const unit = explicitUnit || unitResolution.unit || undefined;
     let room = explicitRoom || location.room || undefined;
     if (unit && room) {
       // Drop leftover "unit 14" tokens from the room once Unit is assigned.
@@ -109,12 +116,34 @@ export function parseMonthlyOutlet(
         sheetName: context.sheetName,
       });
     }
-    if (!explicitUnit && inheritedUnit && unit === inheritedUnit) {
+    if (!explicitUnit && unitResolution.resolvedFromInline && unitResolution.sectionUnit && unit) {
+      noteErrors.push({
+        rowIdx: rows.length,
+        field: 'unit',
+        severity: 'info',
+        message: `Unit resolved as "${unit}" within section "${unitResolution.sectionUnit}"`,
+        sheetName: context.sheetName,
+      });
+    } else if (
+      !explicitUnit &&
+      inheritedUnit &&
+      unit === inheritedUnit &&
+      !unitResolution.ambiguousCombined
+    ) {
       noteErrors.push({
         rowIdx: rows.length,
         field: 'unit',
         severity: 'info',
         message: `Unit inherited from section heading "${inheritedUnit}"`,
+        sheetName: context.sheetName,
+      });
+    }
+    if (!explicitUnit && unitResolution.ambiguousCombined && unitResolution.sectionUnit) {
+      noteErrors.push({
+        rowIdx: rows.length,
+        field: 'unit',
+        severity: 'warning',
+        message: `Could not determine which unit within "${unitResolution.sectionUnit}" from Outlet/Location text`,
         sheetName: context.sheetName,
       });
     }

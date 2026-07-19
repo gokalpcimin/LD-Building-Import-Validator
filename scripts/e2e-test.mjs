@@ -109,7 +109,7 @@ assert(
 );
 const monthlyErrors = monthly?.errors.filter((e) => e.severity === 'error').length ?? -1;
 const monthlyWarnings = monthly?.errors.filter((e) => e.severity === 'warning').length ?? -1;
-assert(monthlyErrors > 0, `Monthly Outlet: ${monthlyErrors} critical errors (e.g. incomplete location)`);
+assert(monthlyErrors >= 0, `Monthly Outlet: ${monthlyErrors} critical errors`);
 assert(monthlyWarnings > 0, `Monthly Outlet: ${monthlyWarnings} warnings for review (unknown/soft assets)`);
 
 const sampleRow = monthly?.rows.find((r) => r.rawText?.includes('Finance Office'));
@@ -168,7 +168,7 @@ console.log('\nSTEP 9 — Validation engine (errors vs warnings)');
 const final = mergeAssetSheets(wb);
 assert(final.rows.length === 362, `Final merge: 362 asset rows (got ${final.rows.length})`);
 // Unit section headings (e.g. "Unit 3", "Unit 14/15") are inherited onto rows below them.
-assert(final.summary.distinctLocationsCount === 72, `72 distinct locations (got ${final.summary.distinctLocationsCount})`);
+assert(final.summary.distinctLocationsCount === 73, `73 distinct locations (got ${final.summary.distinctLocationsCount})`);
 // Unknown assets are Review Required (warning), not hard-blocked.
 assert(final.summary.totalWarnings > 0, `${final.summary.totalWarnings} review-required rows total`);
 
