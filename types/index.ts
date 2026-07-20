@@ -21,6 +21,30 @@ export type AssetType =
   | 'Ice Machine'
   | 'Unknown';
 
+/** Real asset types a reviewer can assign (Unknown is not a valid manual choice). */
+export const SELECTABLE_ASSET_TYPES: readonly AssetType[] = [
+  'Bib Tap',
+  'WC',
+  'Shower',
+  'Kitchen Outlet',
+  'Expansion Vessel',
+  'TMV',
+  'WHB',
+  'Washing Machine',
+  'Dishwasher',
+  'Water Boiler',
+  'Calorifier',
+  'Chilled Water Dispenser',
+  'Chilled Water Fountain',
+  'Water Fountain',
+  'Spray Outlet',
+  'Emergency Shower',
+  'Emergency Eyewash',
+  'Chiller Unit',
+  'Hot Drinks Machine',
+  'Ice Machine',
+] as const;
+
 export type SheetType =
   | 'cover-page'
   | 'monthly-outlet'
@@ -99,7 +123,7 @@ export interface ImportReadyRow {
   assetConfidence?: number;
   /** Keywords that drove the asset classification (for review UI). */
   assetMatchedKeywords?: string[];
-  /** Soft classification or unknown — surface in Review Required. */
+  /** Soft classification — surface in Review Required until a human confirms or overrides. */
   assetNeedsReview?: boolean;
 }
 

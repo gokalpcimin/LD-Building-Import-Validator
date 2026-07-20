@@ -54,12 +54,13 @@ export function validateRow(
       sheetName,
     });
   } else if (row.assetType === 'Unknown') {
-    // Soft unknown — human should classify; do not hard-block the row.
+    // Hard-block: no keyword match means we must not treat the row as importable
+    // until a human (or a later correction) assigns a real asset type.
     errors.push({
       rowIdx,
       field: 'assetType',
-      severity: 'warning',
-      message: 'Unknown asset type — please classify before import',
+      severity: 'error',
+      message: 'Unknown asset type — classify before import',
       sheetName,
     });
   } else if (row.assetNeedsReview) {

@@ -169,8 +169,11 @@ const final = mergeAssetSheets(wb);
 assert(final.rows.length === 362, `Final merge: 362 asset rows (got ${final.rows.length})`);
 // Unit section headings (e.g. "Unit 3", "Unit 14/15") are inherited onto rows below them.
 assert(final.summary.distinctLocationsCount === 73, `73 distinct locations (got ${final.summary.distinctLocationsCount})`);
-// Unknown assets are Review Required (warning), not hard-blocked.
-assert(final.summary.totalWarnings > 0, `${final.summary.totalWarnings} review-required rows total`);
+// Soft-confidence assets stay Review Required; Unknown assets are Blocked (error).
+assert(
+  final.summary.totalErrors + final.summary.totalWarnings > 0,
+  `${final.summary.totalErrors} blocked + ${final.summary.totalWarnings} review-required rows`,
+);
 
 // All rows should have address from cover page
 assert(
@@ -281,7 +284,7 @@ assert(
 );
 
 // Manual override: user marks the Equipment column as ignored — asset type
-// should then be flagged Unknown/Needs Review instead of silently guessed,
+// should then be flagged Unknown/Blocked instead of silently guessed,
 // proving the confirmed mapping (not just keyword luck) drives parsing.
 const overriddenMapping = {
   Assets: { ...renamedMapping.Assets, Equipment: 'ignore' },
@@ -298,8 +301,8 @@ const overriddenStatus = groupRowsByImportStatus(
   overriddenWorkbook.sheets[0].errors,
 );
 assert(
-  overriddenStatus.reviewRows.length === 2 && overriddenStatus.blockedRows.length === 0,
-  'Manual override: Unknown asset type goes to Review Required (not Blocked)',
+  overriddenStatus.blockedRows.length === 2 && overriddenStatus.reviewRows.length === 0,
+  'Manual override: Unknown asset type goes to Blocked (not Review Required)',
 );
 
 // ─── STEP 14: Paste Data — outlet register format ───────────────────────────

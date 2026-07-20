@@ -2,24 +2,35 @@
 
 import DataPreviewTable from './DataPreviewTable';
 import ValidationReport from './ValidationReport';
-import type { ParsedSheet } from '../types';
+import type { AssetType, ParsedSheet } from '../types';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
 import { getSheetStatusLabel } from '../utils/validationEngine';
+import type { SheetReviewEdits } from '../utils/sheetReviewEdits';
 import { Info } from 'lucide-react';
 
 export interface SheetPanelProps {
   sheet: ParsedSheet;
   buildingAddress: string;
   onAddressChange?: (address: string) => void;
+  /** Effective edits already applied into `sheet` for display; used for override badges. */
+  reviewEdits?: SheetReviewEdits;
+  onAssetTypeChange?: (rowIdx: number, assetType: AssetType) => void;
+  onPromoteRow?: (rowIdx: number) => void;
+  onDemoteRow?: (rowIdx: number) => void;
 }
 
 export default function SheetPanel({
   sheet,
   buildingAddress,
   onAddressChange,
+  reviewEdits,
+  onAssetTypeChange,
+  onPromoteRow,
+  onDemoteRow,
 }: SheetPanelProps) {
   const isCoverPage = sheet.sheetType === 'cover-page';
   const isPastedData = sheet.name === 'Pasted Data';
+  const canReviewAssets = !isCoverPage && Boolean(onAssetTypeChange);
 
   return (
     <div className="space-y-6">
@@ -80,6 +91,11 @@ export default function SheetPanel({
             errors={sheet.errors}
             showSheetColumn={!isPastedData}
             showRowColumn={!isPastedData}
+            promotedRowIdxs={reviewEdits?.promotedRowIdxs}
+            assetTypeOverrides={reviewEdits?.assetOverrides}
+            onAssetTypeChange={canReviewAssets ? onAssetTypeChange : undefined}
+            onPromoteRow={canReviewAssets ? onPromoteRow : undefined}
+            onDemoteRow={canReviewAssets ? onDemoteRow : undefined}
           />
         </>
       )}

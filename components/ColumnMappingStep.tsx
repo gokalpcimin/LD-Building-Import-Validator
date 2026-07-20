@@ -246,46 +246,59 @@ export default function ColumnMappingStep({
               </div>
             )}
 
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
-                  <th className="px-6 py-2 font-medium">Column in file</th>
-                  <th className="px-6 py-2 font-medium">Sample value</th>
-                  <th className="px-6 py-2 font-medium">Maps to</th>
-                </tr>
-              </thead>
-              <tbody>
-                {columns.map(({ header, sample }, columnIndex) => {
-                  const role = mapping[header] ?? 'ignore';
-                  return (
-                    <tr
-                      key={`${info.sheetName}-${columnIndex}-${header}`}
-                      className="border-b border-slate-50 last:border-b-0"
-                    >
-                      <td className="px-6 py-2.5 font-medium text-slate-800">{header}</td>
-                      <td className="max-w-[220px] truncate px-6 py-2.5 text-slate-500">
-                        {sample || '—'}
-                      </td>
-                      <td className="px-6 py-2.5">
-                        <select
-                          value={role}
-                          onChange={(event) =>
-                            onRoleChange(info.sheetName, header, event.target.value as ColumnRole)
-                          }
-                          className={`rounded-lg border-0 px-3 py-1.5 text-xs font-medium ${ROLE_BADGE_STYLE[role]} focus:outline-none focus:ring-2 focus:ring-blue-300`}
-                        >
-                          {COLUMN_ROLE_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {COLUMN_ROLE_LABELS[option]}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[32%]" />
+                  <col className="w-[40%]" />
+                  <col className="w-[28%]" />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs uppercase tracking-wide text-slate-400">
+                    <th className="px-6 py-2.5 font-medium">Column in file</th>
+                    <th className="px-6 py-2.5 font-medium">Sample value</th>
+                    <th className="px-6 py-2.5 font-medium">Maps to</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {columns.map(({ header, sample }, columnIndex) => {
+                    const role = mapping[header] ?? 'ignore';
+                    return (
+                      <tr
+                        key={`${info.sheetName}-${columnIndex}-${header}`}
+                        className="border-b border-slate-50 last:border-b-0"
+                      >
+                        <td className="px-6 py-3 align-middle font-medium break-words text-slate-800">
+                          {header}
+                        </td>
+                        <td className="px-6 py-3 align-middle break-words text-slate-500">
+                          {sample || '—'}
+                        </td>
+                        <td className="px-6 py-3 align-middle">
+                          <select
+                            value={role}
+                            onChange={(event) =>
+                              onRoleChange(
+                                info.sheetName,
+                                header,
+                                event.target.value as ColumnRole,
+                              )
+                            }
+                            className={`w-full max-w-[13rem] rounded-lg border-0 px-3 py-1.5 text-xs font-medium ${ROLE_BADGE_STYLE[role]} focus:outline-none focus:ring-2 focus:ring-blue-300`}
+                          >
+                            {COLUMN_ROLE_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {COLUMN_ROLE_LABELS[option]}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       })}

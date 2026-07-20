@@ -8,17 +8,28 @@ import FileUploader from '../components/FileUploader';
 import PastedRegisterReview from '../components/PastedRegisterReview';
 import SheetPanel from '../components/SheetPanel';
 import ValidationReport from '../components/ValidationReport';
-import type { ColumnRole, SheetColumnMapping, SheetData, WorkbookResult } from '../types';
+import type {
+  AssetType,
+  ColumnRole,
+  SheetColumnMapping,
+  SheetData,
+  WorkbookResult,
+} from '../types';
 import { buildDefaultWorkbookMapping } from '../utils/columnMapping';
 import { getSheetTypeLabel } from '../utils/sheetDetection';
 import { parsePastedRegister } from '../utils/pasteRegisterParser';
 import { buildExportRows } from '../utils/importReadyExport';
 import { buildWorkbookSummaryReport } from '../utils/importSummaryReport';
 import { mergeAssetSheets, processWorkbook } from '../utils/processWorkbook';
+import {
+  applyWorkbookReviewEdits,
+  emptySheetReviewEdits,
+  type WorkbookReviewEdits,
+} from '../utils/sheetReviewEdits';
 import { getSheetStatusLabel, groupRowsByImportStatus } from '../utils/validationEngine';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import Image from 'next/image';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 type WorkflowStep = 'upload' | 'mapping' | 'workspace' | 'final' | 'pasteReview';
 
@@ -46,33 +57,31 @@ export default function HomePage() {
   const [fileName, setFileName] = useState<string | undefined>();
   const [needsManualAddress, setNeedsManualAddress] = useState(false);
   const [pasteAddress, setPasteAddress] = useState('');
-  /** Excel Import Ready: Review Required rows the user manually approved. */
-  const [promotedExcelRowIdxs, setPromotedExcelRowIdxs] = useState<Set<number>>(() => new Set());
+  /** Per-sheet asset corrections + Ready approvals on Review Sheets (before Import Ready). */
+  const [sheetReviewEdits, setSheetReviewEdits] = useState<WorkbookReviewEdits>({});
 
-  const activeSheet = useMemo(
-    () => workbook?.sheets.find((sheet) => sheet.name === activeSheetName) ?? null,
-    [workbook, activeSheetName],
-  );
-
-  const finalData = useMemo(() => {
+  const reviewedWorkbook = useMemo(() => {
     if (!workbook) {
       return null;
     }
-    return mergeAssetSheets(workbook);
-  }, [workbook]);
+    return applyWorkbookReviewEdits(workbook, sheetReviewEdits);
+  }, [workbook, sheetReviewEdits]);
 
-  useEffect(() => {
-    setPromotedExcelRowIdxs(new Set());
-  }, [finalData]);
-
-  const effectiveFinalErrors = useMemo(() => {
-    if (!finalData) {
-      return [];
+  const activeSheet = useMemo(() => {
+    if (!reviewedWorkbook) {
+      return null;
     }
-    return finalData.errors.filter(
-      (error) => !(promotedExcelRowIdxs.has(error.rowIdx) && error.severity === 'warning'),
-    );
-  }, [finalData, promotedExcelRowIdxs]);
+    return reviewedWorkbook.sheets.find((sheet) => sheet.name === activeSheetName) ?? null;
+  }, [reviewedWorkbook, activeSheetName]);
+
+  const activeSheetEdits = activeSheetName ? sheetReviewEdits[activeSheetName] : undefined;
+
+  const finalData = useMemo(() => {
+    if (!reviewedWorkbook) {
+      return null;
+    }
+    return mergeAssetSheets(reviewedWorkbook);
+  }, [reviewedWorkbook]);
 
   const finalKpiSummary = useMemo(() => {
     if (!finalData) {
@@ -80,7 +89,7 @@ export default function HomePage() {
     }
     const { reviewRows, blockedRows } = groupRowsByImportStatus(
       finalData.rows,
-      effectiveFinalErrors,
+      finalData.errors,
     );
     return {
       totalImported: finalData.summary.totalImported,
@@ -88,52 +97,88 @@ export default function HomePage() {
       totalErrors: blockedRows.length,
       totalWarnings: reviewRows.length,
     };
-  }, [finalData, effectiveFinalErrors]);
+  }, [finalData]);
 
   const readyExportRows = useMemo(() => {
     if (!finalData) {
       return [];
     }
-    return buildExportRows(finalData.rows, effectiveFinalErrors, 'ready');
-  }, [finalData, effectiveFinalErrors]);
+    return buildExportRows(finalData.rows, finalData.errors, 'ready');
+  }, [finalData]);
 
   const reviewExportRows = useMemo(() => {
     if (!finalData) {
       return [];
     }
-    return buildExportRows(finalData.rows, effectiveFinalErrors, 'review');
-  }, [finalData, effectiveFinalErrors]);
+    return buildExportRows(finalData.rows, finalData.errors, 'review');
+  }, [finalData]);
 
   const summaryReport = useMemo(() => {
-    if (!finalData || !workbook) {
+    if (!finalData || !reviewedWorkbook) {
       return null;
     }
     return buildWorkbookSummaryReport({
       fileName,
-      buildingAddress: workbook.buildingAddress,
+      buildingAddress: reviewedWorkbook.buildingAddress,
       rows: finalData.rows,
-      errors: effectiveFinalErrors,
-      sheets: workbook.sheets,
+      errors: finalData.errors,
+      sheets: reviewedWorkbook.sheets,
       distinctLocations:
         finalKpiSummary?.distinctLocationsCount ?? finalData.summary.distinctLocationsCount,
     });
-  }, [finalData, workbook, fileName, effectiveFinalErrors, finalKpiSummary]);
+  }, [finalData, reviewedWorkbook, fileName, finalKpiSummary]);
 
-  const promoteExcelRow = useCallback((rowIdx: number) => {
-    setPromotedExcelRowIdxs((prev) => {
-      const next = new Set(prev);
-      next.add(rowIdx);
-      return next;
-    });
-  }, []);
+  const updateSheetEdits = useCallback(
+    (sheetName: string, updater: (edits: ReturnType<typeof emptySheetReviewEdits>) => void) => {
+      setSheetReviewEdits((prev) => {
+        const current = prev[sheetName]
+          ? {
+              assetOverrides: new Map(prev[sheetName].assetOverrides),
+              promotedRowIdxs: new Set(prev[sheetName].promotedRowIdxs),
+            }
+          : emptySheetReviewEdits();
+        updater(current);
+        return { ...prev, [sheetName]: current };
+      });
+    },
+    [],
+  );
 
-  const demoteExcelRow = useCallback((rowIdx: number) => {
-    setPromotedExcelRowIdxs((prev) => {
-      const next = new Set(prev);
-      next.delete(rowIdx);
-      return next;
-    });
-  }, []);
+  const changeSheetAssetType = useCallback(
+    (rowIdx: number, assetType: AssetType) => {
+      if (!activeSheetName) {
+        return;
+      }
+      updateSheetEdits(activeSheetName, (edits) => {
+        edits.assetOverrides.set(rowIdx, assetType);
+      });
+    },
+    [activeSheetName, updateSheetEdits],
+  );
+
+  const promoteSheetRow = useCallback(
+    (rowIdx: number) => {
+      if (!activeSheetName) {
+        return;
+      }
+      updateSheetEdits(activeSheetName, (edits) => {
+        edits.promotedRowIdxs.add(rowIdx);
+      });
+    },
+    [activeSheetName, updateSheetEdits],
+  );
+
+  const demoteSheetRow = useCallback(
+    (rowIdx: number) => {
+      if (!activeSheetName) {
+        return;
+      }
+      updateSheetEdits(activeSheetName, (edits) => {
+        edits.promotedRowIdxs.delete(rowIdx);
+      });
+    },
+    [activeSheetName, updateSheetEdits],
+  );
 
   // Pasted building-register text is semi-structured free text, not a
   // column grid — it gets its own dedicated parsing engine and review
@@ -177,6 +222,7 @@ export default function HomePage() {
   const handleMappingConfirm = useCallback(() => {
     const result = processWorkbook(rawSheets, { fileName, columnMappings });
     setWorkbook(result);
+    setSheetReviewEdits({});
 
     setNeedsManualAddress(!result.buildingAddress.trim());
 
@@ -219,6 +265,7 @@ export default function HomePage() {
     setFileName(undefined);
     setNeedsManualAddress(false);
     setPasteAddress('');
+    setSheetReviewEdits({});
   }, []);
 
   const handleBack = useCallback(() => {
@@ -362,7 +409,7 @@ export default function HomePage() {
           />
         )}
 
-        {step === 'workspace' && workbook && (
+        {step === 'workspace' && workbook && reviewedWorkbook && (
           <div className="space-y-6">
             {needsManualAddress && (
               <BuildingAddressPanel
@@ -373,7 +420,7 @@ export default function HomePage() {
 
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4 pt-4">
-                {workbook.sheets.map((sheet) => (
+                {reviewedWorkbook.sheets.map((sheet) => (
                   <button
                     key={sheet.name}
                     type="button"
@@ -390,12 +437,12 @@ export default function HomePage() {
               </div>
 
               <div className="grid gap-3 border-b border-slate-200 bg-slate-50 px-6 py-3 sm:grid-cols-2">
-                {workbook.sheets.map((sheet) => (
+                {reviewedWorkbook.sheets.map((sheet) => (
                   <div key={`${sheet.name}-status`} className="text-xs text-slate-600">
                     <span className="font-medium text-slate-800">{sheet.name}:</span>{' '}
                     {sheet.sheetType === 'cover-page'
-                      ? workbook.buildingAddress
-                        ? `Address: ${workbook.buildingAddress}`
+                      ? reviewedWorkbook.buildingAddress
+                        ? `Address: ${reviewedWorkbook.buildingAddress}`
                         : 'Address missing'
                       : getSheetStatusLabel(sheet.rows.length, sheet.errors)}
                   </div>
@@ -406,17 +453,21 @@ export default function HomePage() {
             {activeSheet && (
               <SheetPanel
                 sheet={activeSheet}
-                buildingAddress={workbook.buildingAddress}
+                buildingAddress={reviewedWorkbook.buildingAddress}
+                reviewEdits={activeSheetEdits}
+                onAssetTypeChange={changeSheetAssetType}
+                onPromoteRow={promoteSheetRow}
+                onDemoteRow={demoteSheetRow}
                 onAddressChange={
                   activeSheet.sheetType === 'cover-page' ? handleAddressChange : undefined
                 }
               />
             )}
 
-            {workbook.buildingAddress && (
+            {reviewedWorkbook.buildingAddress && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                Building address: <strong>{workbook.buildingAddress}</strong> — applied to all
-                asset rows automatically.
+                Building address: <strong>{reviewedWorkbook.buildingAddress}</strong> — applied to
+                all asset rows automatically.
               </div>
             )}
 
@@ -425,19 +476,20 @@ export default function HomePage() {
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">View Import Summary</h3>
                   <p className="mt-1 text-sm text-slate-500">
-                    Review the merged validation report across all asset sheets.
+                    Correct asset types and approve Review rows here first. Then open the merged
+                    import summary.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setStep('final')}
-                  disabled={!workbook.buildingAddress}
+                  disabled={!reviewedWorkbook.buildingAddress}
                   className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   View Import Summary
                 </button>
               </div>
-              {!workbook.buildingAddress.trim() && needsManualAddress && (
+              {!reviewedWorkbook.buildingAddress.trim() && needsManualAddress && (
                 <p className="mt-3 text-xs font-medium text-amber-700">
                   Building address could not be detected automatically. Please enter it manually
                   above before viewing the import summary.
@@ -447,7 +499,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {step === 'final' && finalData && workbook && (
+        {step === 'final' && finalData && reviewedWorkbook && (
           <div className="space-y-8">
             <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -455,8 +507,8 @@ export default function HomePage() {
                   <h2 className="text-base font-semibold text-slate-900">Validation Complete</h2>
                   <p className="mt-1 text-sm text-slate-500">
                     {fileName
-                      ? `Parsed ${finalData.rows.length} asset rows from ${fileName}. Review the summary and preview below.`
-                      : `Parsed ${finalData.rows.length} asset rows. Review the summary and preview below.`}
+                      ? `Parsed ${finalData.rows.length} asset rows from ${fileName}. Asset corrections from Review Sheets are already applied below.`
+                      : `Parsed ${finalData.rows.length} asset rows. Asset corrections from Review Sheets are already applied below.`}
                   </p>
                 </div>
                 <ExportDownloadButtons
@@ -469,7 +521,7 @@ export default function HomePage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              {workbook.sheets
+              {reviewedWorkbook.sheets
                 .filter((sheet) => sheet.sheetType !== 'cover-page')
                 .map((sheet) => (
                   <div
@@ -481,19 +533,17 @@ export default function HomePage() {
                   </div>
                 ))}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 sm:col-span-2">
-                Building: {workbook.buildingAddress} · {finalData.rows.length} total asset rows
+                Building: {reviewedWorkbook.buildingAddress} · {finalData.rows.length} total asset
+                rows
               </div>
             </div>
 
             <ValidationReport summary={finalKpiSummary ?? finalData.summary} />
             <DataPreviewTable
               rows={finalData.rows}
-              errors={effectiveFinalErrors}
-              showSheetColumn={false}
+              errors={finalData.errors}
+              showSheetColumn
               showRowColumn={false}
-              promotedRowIdxs={promotedExcelRowIdxs}
-              onPromoteRow={promoteExcelRow}
-              onDemoteRow={demoteExcelRow}
             />
           </div>
         )}

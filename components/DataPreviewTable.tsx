@@ -1,6 +1,7 @@
 'use client';
 
-import type { ImportReadyRow, ValidationError } from '../types';
+import type { AssetType, ImportReadyRow, ValidationError } from '../types';
+import { SELECTABLE_ASSET_TYPES } from '../types';
 import { groupRowsByImportStatus } from '../utils/validationEngine';
 import { AlertTriangle, CheckCircle2, ClipboardList, ShieldX, Undo2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -14,6 +15,9 @@ export interface DataPreviewTableProps {
   showRowColumn?: boolean;
   /** rowIdx values the user manually moved from Review → Ready. */
   promotedRowIdxs?: Set<number>;
+  /** Manual Asset Type corrections keyed by rowIdx. */
+  assetTypeOverrides?: Map<number, AssetType>;
+  onAssetTypeChange?: (rowIdx: number, assetType: AssetType) => void;
   onPromoteRow?: (rowIdx: number) => void;
   onDemoteRow?: (rowIdx: number) => void;
 }
@@ -47,12 +51,107 @@ function IssueBadges({ rowErrors }: { rowErrors: ValidationError[] }) {
   );
 }
 
+function AssetTypeCell({
+  row,
+  rowIdx,
+  editable,
+  wasOverridden,
+  onAssetTypeChange,
+}: {
+  row: ImportReadyRow;
+  rowIdx: number;
+  editable: boolean;
+  wasOverridden: boolean;
+  onAssetTypeChange?: (rowIdx: number, assetType: AssetType) => void;
+}) {
+  if (editable && onAssetTypeChange) {
+    const options =
+      row.assetType === 'Unknown' ||
+      !SELECTABLE_ASSET_TYPES.includes(row.assetType as (typeof SELECTABLE_ASSET_TYPES)[number])
+        ? (['Unknown', ...SELECTABLE_ASSET_TYPES] as AssetType[])
+        : ([...SELECTABLE_ASSET_TYPES] as AssetType[]);
+
+    return (
+      <div className="space-y-1">
+        <select
+          value={row.assetType}
+          onChange={(event) => onAssetTypeChange(rowIdx, event.target.value as AssetType)}
+          aria-label={`Asset type for row ${rowIdx + 1}`}
+          className="w-full max-w-[11rem] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+        >
+          {options.map((assetType) => (
+            <option key={assetType} value={assetType} disabled={assetType === 'Unknown'}>
+              {assetType}
+            </option>
+          ))}
+        </select>
+        {wasOverridden ? (
+          <div className="text-[11px] font-medium text-teal-700">Manually set</div>
+        ) : (
+          (row.assetMatchedKeywords?.length || row.assetConfidence != null) && (
+            <div className="space-y-0.5 text-[11px] text-slate-500">
+              {row.assetMatchedKeywords && row.assetMatchedKeywords.length > 0 && (
+                <div>
+                  Detected from:{' '}
+                  <span className="font-medium text-slate-600">
+                    &quot;{row.assetMatchedKeywords.join(', ')}&quot;
+                  </span>
+                </div>
+              )}
+              {row.assetConfidence != null && (
+                <div>
+                  Confidence:{' '}
+                  <span className="font-medium text-slate-600">
+                    {Math.round(row.assetConfidence * 100)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div>{row.assetType}</div>
+      {wasOverridden ? (
+        <div className="mt-1 text-[11px] font-medium text-teal-700">Manually set</div>
+      ) : (
+        (row.assetMatchedKeywords?.length || row.assetConfidence != null) && (
+          <div className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+            {row.assetMatchedKeywords && row.assetMatchedKeywords.length > 0 && (
+              <div>
+                Detected from:{' '}
+                <span className="font-medium text-slate-600">
+                  &quot;{row.assetMatchedKeywords.join(', ')}&quot;
+                </span>
+              </div>
+            )}
+            {row.assetConfidence != null && (
+              <div>
+                Confidence:{' '}
+                <span className="font-medium text-slate-600">
+                  {Math.round(row.assetConfidence * 100)}%
+                </span>
+              </div>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export default function DataPreviewTable({
   rows,
   errors,
   showSheetColumn = true,
   showRowColumn = true,
   promotedRowIdxs,
+  assetTypeOverrides,
+  onAssetTypeChange,
   onPromoteRow,
   onDemoteRow,
 }: DataPreviewTableProps) {
@@ -102,14 +201,16 @@ export default function DataPreviewTable({
   const showBuildingNoColumn = rows.some((row) => row.buildingNo);
   const showQuantityColumn = rows.some((row) => row.quantity != null);
   const showActionColumn = activeTab === 'review' || activeTab === 'ready';
+  const canEditAsset = Boolean(onAssetTypeChange) && (activeTab === 'review' || activeTab === 'blocked');
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-6 py-5">
         <h2 className="text-lg font-semibold text-slate-900">Import Ready Preview</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Parsed rows classified as Ready, Review Required or Blocked. You can manually move Review
-          Required rows into Ready after checking them.
+          {canEditAsset
+            ? 'Change Asset Type with the dropdown if the suggestion is wrong, then move the row to Ready when you are satisfied. Corrections carry into Import Ready.'
+            : 'Merged preview of Ready, Review Required and Blocked rows. Edit asset types on the Review Sheets step.'}
         </p>
       </div>
 
@@ -171,17 +272,17 @@ export default function DataPreviewTable({
           <div className="w-full overflow-x-auto">
             <table className="w-full table-fixed divide-y divide-slate-200 text-left text-sm">
               <colgroup>
-                {showSheetColumn && <col className="w-[8%]" />}
+                {showSheetColumn && <col className="w-[7%]" />}
                 {showRowColumn && <col className="w-[4%]" />}
-                <col className="w-[12%]" />
+                <col className="w-[11%]" />
                 {showBuildingNoColumn && <col className="w-[5%]" />}
                 <col className="w-[6%]" />
                 <col className="w-[7%]" />
-                <col className="w-[9%]" />
-                <col className="w-[9%]" />
+                <col className="w-[8%]" />
+                <col className="w-[12%]" />
                 {showQuantityColumn && <col className="w-[4%]" />}
-                <col className="w-[14%]" />
-                <col className="w-[22%]" />
+                <col className="w-[13%]" />
+                <col className="w-[20%]" />
                 {showActionColumn && <col className="w-[9%]" />}
               </colgroup>
               <thead>
@@ -217,6 +318,7 @@ export default function DataPreviewTable({
               <tbody className="divide-y divide-slate-100">
                 {displayedRows.map(({ row, rowIdx, rowErrors }) => {
                   const wasPromoted = promoted.has(rowIdx);
+                  const wasOverridden = Boolean(assetTypeOverrides?.has(rowIdx));
                   return (
                     <tr key={`${row.sheetName ?? 'row'}-${rowIdx}`} className="hover:bg-slate-50">
                       {showSheetColumn && (
@@ -247,27 +349,13 @@ export default function DataPreviewTable({
                         {row.room || '—'}
                       </td>
                       <td className="px-2 py-2.5 align-top text-xs text-slate-700 break-words">
-                        <div>{row.assetType}</div>
-                        {(row.assetMatchedKeywords?.length || row.assetConfidence != null) && (
-                          <div className="mt-1 space-y-0.5 text-[11px] text-slate-500">
-                            {row.assetMatchedKeywords && row.assetMatchedKeywords.length > 0 && (
-                              <div>
-                                Detected from:{' '}
-                                <span className="font-medium text-slate-600">
-                                  &quot;{row.assetMatchedKeywords.join(', ')}&quot;
-                                </span>
-                              </div>
-                            )}
-                            {row.assetConfidence != null && (
-                              <div>
-                                Confidence:{' '}
-                                <span className="font-medium text-slate-600">
-                                  {Math.round(row.assetConfidence * 100)}%
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <AssetTypeCell
+                          row={row}
+                          rowIdx={rowIdx}
+                          editable={canEditAsset}
+                          wasOverridden={wasOverridden}
+                          onAssetTypeChange={onAssetTypeChange}
+                        />
                       </td>
                       {showQuantityColumn && (
                         <td className="px-2 py-2.5 align-top text-xs text-slate-700">
